@@ -57,6 +57,29 @@ server with `npm --prefix apps/docs run preview -- stop` or
 `npm --prefix apps/docs run dev -- stop`. For a foreground process managed by
 another supervisor, append `-- --ignore-lock`; the supervisor then owns shutdown.
 
+## Cloudflare production deployment
+
+The public handbook is hosted at **[ffkv-docs.akhilgautam.workers.dev](https://ffkv-docs.akhilgautam.workers.dev/)** using [Cloudflare Workers Static Assets](https://developers.cloudflare.com/workers/static-assets/get-started/).
+
+`apps/docs/wrangler.jsonc` pins the `ffkv-docs` Worker and its Cloudflare account. It serves only the generated documentation; it does not deploy the KV server, management console or repository source.
+
+From the repository root, install the locked documentation dependencies and deploy:
+
+```sh
+npx --yes --package node@22.23.4 -- npm --prefix apps/docs ci
+npx --yes --package node@22.23.4 --package wrangler@4.156.1 -- wrangler --cwd apps/docs deploy
+```
+
+On a machine not yet authenticated to the deployment account, first run:
+
+```sh
+npx --yes --package node@22.23.4 --package wrangler@4.156.1 -- wrangler login
+```
+
+Wrangler's custom build sets `DOCS_SITE` to the public origin and `DOCS_BASE=/`, regenerates the reference, builds the search index and runs the full site integrity audit before uploading `dist`. The hosting configuration preserves trailing-slash routes and serves the generated error page with HTTP 404 for missing paths, rather than an SPA fallback.
+
+Deployment is manual: pushing to GitHub runs documentation CI but does not publish to Cloudflare. To deploy a fork or change the public hostname, update the Worker name, account and build origin in `wrangler.jsonc` together. Authentication stays in Wrangler's local credentials or the deploying environment, never in the repository.
+
 ## Publish at a domain root
 
 Configure the deployment origin with `DOCS_SITE`. It must be the actual public origin, including the scheme. It is build-time configuration for canonical URLs and sitemap entries, not a KV connection string. Never put a password or token in it.
@@ -108,7 +131,7 @@ Serve directories through their `index.html`, and serve `404.html` with **HTTP 4
 
 Keep the entire output, including `_astro`, `pagefind`, sitemap and favicon assets. Pagefind runs in the browser and fetches its local index/chunks; dropping that directory breaks production search. Use HTTPS on the public host, compress text assets, and allow `.wasm` with the `application/wasm` content type when the search build emits WebAssembly.
 
-No production host account, domain, certificate or deployment credential is configured by this repository. Publication remains an operator action; the site build and preview need none of those credentials.
+The Cloudflare target is configured in `apps/docs/wrangler.jsonc`; no deployment credential is stored in the repository. Other hosting providers require their own publication setup. Local builds and previews need no hosting credentials.
 
 ## Maintain the content
 

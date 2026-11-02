@@ -13,6 +13,7 @@ __pycache__/
 /apps/docs/node_modules/
 /apps/docs/dist/
 /apps/docs/.astro/
+/apps/docs/.wrangler/
 /apps/docs/*.tsbuildinfo
 /apps/docs/src/content/docs/reference/commands/
 /apps/docs/src/content/docs/reference/extensions.md

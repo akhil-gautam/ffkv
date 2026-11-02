@@ -12,6 +12,8 @@ Brand assets: [wordmark](apps/docs/public/brand/ffkv-wordmark.svg) · [symbol](a
 
 ## Documentation site
 
+**Public handbook: [ffkv-docs.akhilgautam.workers.dev](https://ffkv-docs.akhilgautam.workers.dev/).**
+
 The Astro + Starlight handbook lives in [`apps/docs`](apps/docs). It includes
 installation and operator guides, all 19 datatype families, a searchable generated
 reference for the Redis 8.10 catalog, and ffkv's extension commands. It is separate
@@ -47,6 +49,16 @@ The build includes a full internal-link, heading, command-route and search-index
 audit. Static output is `apps/docs/dist/`. Set `DOCS_SITE` to the deployment origin
 and optional `DOCS_BASE` to a project subpath before building; see the site's
 **Deploy → Documentation site** guide for static-host and subpath instructions.
+
+Production hosting uses Cloudflare Workers Static Assets. To rebuild, audit and
+deploy using your authenticated Wrangler account:
+
+```sh
+npx --yes --package node@22.23.4 --package wrangler@4.156.1 -- wrangler --cwd apps/docs deploy
+```
+
+The target account, Worker and production build origin are pinned in
+`apps/docs/wrangler.jsonc`. GitHub CI validates builds; publication is manual.
 
 ## MCP integration
 
