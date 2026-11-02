@@ -1237,6 +1237,29 @@ lease/idempotency preservation and fenced promotion.
 
 ### Reproducible measurements and fault/soak coverage
 
+For the broader native-client Redis comparison (strings, counters, hashes,
+sorted sets, concurrency, pipelining and separate durability profiles):
+
+```sh
+cargo build --release --bin ffkv
+python3 benchmarks/redis_compare.py --repetitions 3 --target-seconds 3 --json redis-comparison.json
+```
+
+This runs 198 measured trials with excluded warmup/calibration and alternating
+engine order. It uses the compiled `redis-benchmark` for both engines and records
+native latency, CPU, RSS, correctness checks and raw output. Pipeline latency is
+the native client's first-read-event measurement, not per-reply completion time.
+See the handbook's **Contributing → Benchmarks** guide for the full methodology.
+
+The [2026-11-02 evidence](benchmarks/results/redis-vs-ffkv-2026-11-02/summary.json)
+contains 198 main trials, 24 client-thread sensitivity trials and three repeated
+backlog matrices, with raw reports alongside the summary. All completed checks
+passed. Redis had higher median throughput in every matched main profile; ffkv
+also used more backlog RSS in the memory-backend comparison. This M4 run used
+battery power and Low Power Mode, so it is not an unrestricted capacity claim.
+
+For the complementary list backlog/RSS and fault/soak workloads:
+
 ```sh
 cargo build --release
 python3 benchmarks/compare.py --binary target/release/ffkv --items 4096 --hot-operations 512 --json benchmark.json --csv benchmark.csv
@@ -1252,7 +1275,7 @@ OS-cache eviction. `--items`, `--duration` and external endpoints support larger
 longer workloads; never point the harness at a production dataset. External
 Valkey/Dragonfly persistence must be verified separately and is labelled unverified.
 
-Published evidence: `benchmarks/results/macos-arm64.json`. Shared development
+Earlier list/hybrid evidence: `benchmarks/results/macos-arm64.json`. Shared development
 workstation: macOS 27.0.1/arm64, 10 logical CPUs, Python 3.12.10, ffkv 0.1.0 release,
 Redis 8.2.1; 4,096 queued bodies, four clients, pipeline eight, hybrid cache 1 MiB,
 inline threshold 1 KiB. All 24 cases completed without reported command errors.

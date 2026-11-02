@@ -1,0 +1,927 @@
+{
+  "cases": [
+    {
+      "address": [
+        "127.0.0.1",
+        58166
+      ],
+      "cleanup_errors": [],
+      "cold_definition": "first LINDEX pass over backlog; OS cache NOT evicted",
+      "command_line": [
+        "/Users/akhilgautam/projects/personal/ffkv/target/release/ffkv",
+        "--bind",
+        "127.0.0.1:0",
+        "--storage",
+        "memory"
+      ],
+      "concurrency": 8,
+      "durability": "memory",
+      "engine": "ffkv",
+      "errors": [],
+      "items": 8192,
+      "ok": true,
+      "ownership": "owned child/tempdir",
+      "payload_bytes": 4096,
+      "persistence_verification": {
+        "mode": "memory",
+        "status": "owned exact CLI settings",
+        "storage": "memory"
+      },
+      "phases": [
+        {
+          "attempted": 8192,
+          "completed": 8192,
+          "completed_ops_per_second": 53138.5180469688,
+          "elapsed_seconds": 0.15416312500019558,
+          "error_examples": [],
+          "errors": 0,
+          "latency_samples": 8192,
+          "latency_semantics": "send-start to each reply; includes pipeline queueing; no inferred per-command division",
+          "max_ms": 2.326458001334686,
+          "p50_ms": 0.733449938179339,
+          "p95_ms": 1.2596682579212306,
+          "p99_ms": 1.5297726688624709,
+          "percentile_method": "measured logarithmic histogram upper bound; bucket ratio 2^(1/1024)",
+          "phase": "backlog_enqueue",
+          "retries": 0,
+          "unknown_outcomes": 0
+        },
+        {
+          "attempted": 8192,
+          "completed": 8192,
+          "completed_ops_per_second": 52442.309139134006,
+          "elapsed_seconds": 0.15620974999910686,
+          "error_examples": [],
+          "errors": 0,
+          "latency_samples": 8192,
+          "latency_semantics": "send-start to each reply; includes pipeline queueing; no inferred per-command division",
+          "max_ms": 2.842499998223502,
+          "p50_ms": 0.7617861178745265,
+          "p95_ms": 1.4047081340574024,
+          "p99_ms": 1.7923257946970794,
+          "percentile_method": "measured logarithmic histogram upper bound; bucket ratio 2^(1/1024)",
+          "phase": "cold_first_read",
+          "retries": 0,
+          "unknown_outcomes": 0
+        },
+        {
+          "attempted": 159832,
+          "completed": 159832,
+          "completed_ops_per_second": 53218.142926176115,
+          "elapsed_seconds": 3.0033366670031683,
+          "error_examples": [],
+          "errors": 0,
+          "latency_samples": 159832,
+          "latency_semantics": "send-start to each reply; includes pipeline queueing; no inferred per-command division",
+          "max_ms": 4.823249997571111,
+          "p50_ms": 0.7747871679757362,
+          "p95_ms": 1.4738669970484894,
+          "p99_ms": 1.864092599044701,
+          "percentile_method": "measured logarithmic histogram upper bound; bucket ratio 2^(1/1024)",
+          "phase": "hot_repeat_read",
+          "retries": 0,
+          "unknown_outcomes": 0
+        },
+        {
+          "attempted": 4096,
+          "completed": 4096,
+          "completed_ops_per_second": 50884.80551963041,
+          "elapsed_seconds": 0.080495542002609,
+          "error_examples": [],
+          "errors": 0,
+          "latency_samples": 4096,
+          "latency_semantics": "send-start to each reply; includes pipeline queueing; no inferred per-command division",
+          "max_ms": 2.5450839966651984,
+          "p50_ms": 0.7800495046004922,
+          "p95_ms": 1.458977771334554,
+          "p99_ms": 1.8278570099905893,
+          "percentile_method": "measured logarithmic histogram upper bound; bucket ratio 2^(1/1024)",
+          "phase": "half_drain",
+          "retries": 0,
+          "unknown_outcomes": 0
+        },
+        {
+          "elapsed_seconds": 4.207999154459685e-06,
+          "errors": 0,
+          "phase": "compaction",
+          "reason": "memory payload storage has no blob compaction",
+          "status": "not_applicable"
+        },
+        {
+          "attempted": 4096,
+          "completed": 4096,
+          "completed_ops_per_second": 50424.2798115643,
+          "elapsed_seconds": 0.08123070900182938,
+          "error_examples": [],
+          "errors": 0,
+          "latency_samples": 4096,
+          "latency_semantics": "send-start to each reply; includes pipeline queueing; no inferred per-command division",
+          "max_ms": 2.454000001307577,
+          "p50_ms": 0.804175842276251,
+          "p95_ms": 1.4200044027483036,
+          "p99_ms": 1.7013000332570805,
+          "percentile_method": "measured logarithmic histogram upper bound; bucket ratio 2^(1/1024)",
+          "phase": "final_drain",
+          "retries": 0,
+          "unknown_outcomes": 0
+        }
+      ],
+      "pipeline": 8,
+      "rss": [
+        {
+          "bytes": 13762560,
+          "monotonic_seconds": 38590.347166,
+          "phase": "idle",
+          "source": "ps current RSS KiB"
+        },
+        {
+          "bytes": 156352512,
+          "monotonic_seconds": 38590.508940958,
+          "phase": "backlog",
+          "source": "ps current RSS KiB"
+        },
+        {
+          "bytes": 158744576,
+          "monotonic_seconds": 38593.76229575,
+          "phase": "half_drain",
+          "source": "ps current RSS KiB"
+        },
+        {
+          "bytes": 158744576,
+          "monotonic_seconds": 38593.766665,
+          "phase": "post_compaction",
+          "source": "ps current RSS KiB"
+        },
+        {
+          "bytes": 160169984,
+          "monotonic_seconds": 38593.854969916,
+          "phase": "drain",
+          "source": "ps current RSS KiB"
+        }
+      ],
+      "semantics": "LPUSH/LINDEX/LPOP Redis-compatible lists, remove-on-pop; no native ACK comparison",
+      "server_identity": [
+        "server",
+        [
+          "name",
+          "ffkv",
+          "version",
+          "0.1.0",
+          "redis_baseline",
+          "redis-7.2",
+          "shards",
+          4,
+          "storage_mode",
+          "memory",
+          "durability",
+          "none",
+          "role",
+          "master",
+          "instance_id",
+          "09603fa1220056a5572269c69212ba3d",
+          "revision",
+          0,
+          "dataset_ready",
+          1
+        ],
+        "storage",
+        null,
+        "wal",
+        [
+          "bytes",
+          0,
+          "policy",
+          "none",
+          "dirty",
+          0,
+          "last_sync_ms",
+          null
+        ],
+        "key_count",
+        0
+      ],
+      "socket_timeout_seconds": 30.0,
+      "storage": "memory"
+    },
+    {
+      "address": [
+        "127.0.0.1",
+        58211
+      ],
+      "cleanup_errors": [],
+      "cold_definition": "first LINDEX pass over backlog; OS cache NOT evicted",
+      "command_line": [
+        "/Users/akhilgautam/projects/personal/ffkv/target/release/ffkv",
+        "--bind",
+        "127.0.0.1:0",
+        "--storage",
+        "memory"
+      ],
+      "concurrency": 8,
+      "durability": "memory",
+      "engine": "ffkv",
+      "errors": [],
+      "items": 8192,
+      "ok": true,
+      "ownership": "owned child/tempdir",
+      "payload_bytes": 65536,
+      "persistence_verification": {
+        "mode": "memory",
+        "status": "owned exact CLI settings",
+        "storage": "memory"
+      },
+      "phases": [
+        {
+          "attempted": 8192,
+          "completed": 8192,
+          "completed_ops_per_second": 31667.435274422518,
+          "elapsed_seconds": 0.2586884580014157,
+          "error_examples": [],
+          "errors": 0,
+          "latency_samples": 8192,
+          "latency_semantics": "send-start to each reply; includes pipeline queueing; no inferred per-command division",
+          "max_ms": 4.875541999354027,
+          "p50_ms": 1.409470434052639,
+          "p95_ms": 2.9939855901883052,
+          "p99_ms": 4.054621592961639,
+          "percentile_method": "measured logarithmic histogram upper bound; bucket ratio 2^(1/1024)",
+          "phase": "backlog_enqueue",
+          "retries": 0,
+          "unknown_outcomes": 0
+        },
+        {
+          "attempted": 8192,
+          "completed": 8192,
+          "completed_ops_per_second": 22845.108890198277,
+          "elapsed_seconds": 0.35858879199804505,
+          "error_examples": [],
+          "errors": 0,
+          "latency_samples": 8192,
+          "latency_semantics": "send-start to each reply; includes pipeline queueing; no inferred per-command division",
+          "max_ms": 4.943583000567742,
+          "p50_ms": 1.6536133777457773,
+          "p95_ms": 3.1138682469610703,
+          "p99_ms": 3.6955221356679657,
+          "percentile_method": "measured logarithmic histogram upper bound; bucket ratio 2^(1/1024)",
+          "phase": "cold_first_read",
+          "retries": 0,
+          "unknown_outcomes": 0
+        },
+        {
+          "attempted": 69440,
+          "completed": 69440,
+          "completed_ops_per_second": 23116.66797398311,
+          "elapsed_seconds": 3.003893125001923,
+          "error_examples": [],
+          "errors": 0,
+          "latency_samples": 69440,
+          "latency_semantics": "send-start to each reply; includes pipeline queueing; no inferred per-command division",
+          "max_ms": 6.726291998347733,
+          "p50_ms": 1.6491420999160364,
+          "p95_ms": 3.1223108002486732,
+          "p99_ms": 3.7357637333136453,
+          "percentile_method": "measured logarithmic histogram upper bound; bucket ratio 2^(1/1024)",
+          "phase": "hot_repeat_read",
+          "retries": 0,
+          "unknown_outcomes": 0
+        },
+        {
+          "attempted": 4096,
+          "completed": 4096,
+          "completed_ops_per_second": 22475.470611450222,
+          "elapsed_seconds": 0.182243124996603,
+          "error_examples": [],
+          "errors": 0,
+          "latency_samples": 4096,
+          "latency_semantics": "send-start to each reply; includes pipeline queueing; no inferred per-command division",
+          "max_ms": 5.159334003110416,
+          "p50_ms": 1.6727519520758267,
+          "p95_ms": 3.190680503986073,
+          "p99_ms": 3.9038017193011525,
+          "percentile_method": "measured logarithmic histogram upper bound; bucket ratio 2^(1/1024)",
+          "phase": "half_drain",
+          "retries": 0,
+          "unknown_outcomes": 0
+        },
+        {
+          "elapsed_seconds": 3.875000402331352e-06,
+          "errors": 0,
+          "phase": "compaction",
+          "reason": "memory payload storage has no blob compaction",
+          "status": "not_applicable"
+        },
+        {
+          "attempted": 4096,
+          "completed": 4096,
+          "completed_ops_per_second": 22830.383150875572,
+          "elapsed_seconds": 0.1794100420011091,
+          "error_examples": [],
+          "errors": 0,
+          "latency_samples": 4096,
+          "latency_semantics": "send-start to each reply; includes pipeline queueing; no inferred per-command division",
+          "max_ms": 5.6402500049443915,
+          "p50_ms": 1.6502587846491175,
+          "p95_ms": 3.1138682469610703,
+          "p99_ms": 3.72566243770083,
+          "percentile_method": "measured logarithmic histogram upper bound; bucket ratio 2^(1/1024)",
+          "phase": "final_drain",
+          "retries": 0,
+          "unknown_outcomes": 0
+        }
+      ],
+      "pipeline": 8,
+      "rss": [
+        {
+          "bytes": 13811712,
+          "monotonic_seconds": 38593.894768416,
+          "phase": "idle",
+          "source": "ps current RSS KiB"
+        },
+        {
+          "bytes": 990969856,
+          "monotonic_seconds": 38594.161843125,
+          "phase": "backlog",
+          "source": "ps current RSS KiB"
+        },
+        {
+          "bytes": 993280000,
+          "monotonic_seconds": 38597.720784,
+          "phase": "half_drain",
+          "source": "ps current RSS KiB"
+        },
+        {
+          "bytes": 993280000,
+          "monotonic_seconds": 38597.725352958,
+          "phase": "post_compaction",
+          "source": "ps current RSS KiB"
+        },
+        {
+          "bytes": 994525184,
+          "monotonic_seconds": 38597.91249325,
+          "phase": "drain",
+          "source": "ps current RSS KiB"
+        }
+      ],
+      "semantics": "LPUSH/LINDEX/LPOP Redis-compatible lists, remove-on-pop; no native ACK comparison",
+      "server_identity": [
+        "server",
+        [
+          "name",
+          "ffkv",
+          "version",
+          "0.1.0",
+          "redis_baseline",
+          "redis-7.2",
+          "shards",
+          4,
+          "storage_mode",
+          "memory",
+          "durability",
+          "none",
+          "role",
+          "master",
+          "instance_id",
+          "b1a1d6514069167ddfb02bb4efc4f018",
+          "revision",
+          0,
+          "dataset_ready",
+          1
+        ],
+        "storage",
+        null,
+        "wal",
+        [
+          "bytes",
+          0,
+          "policy",
+          "none",
+          "dirty",
+          0,
+          "last_sync_ms",
+          null
+        ],
+        "key_count",
+        0
+      ],
+      "socket_timeout_seconds": 30.0,
+      "storage": "memory"
+    },
+    {
+      "address": [
+        "127.0.0.1",
+        58255
+      ],
+      "cleanup_errors": [],
+      "cold_definition": "first LINDEX pass over backlog; OS cache NOT evicted",
+      "command_line": [
+        "/opt/homebrew/bin/redis-server",
+        "--bind",
+        "127.0.0.1",
+        "--port",
+        "58255",
+        "--protected-mode",
+        "yes",
+        "--dir",
+        "/var/folders/s7/pv15tmjx3rlg0_s43vb4bbsc0000gn/T/ffkv-benchmark-z3707w3y/redis-memory-memory-4096",
+        "--save",
+        "",
+        "--appendonly",
+        "no",
+        "--appendfsync",
+        "everysec",
+        "--no-appendfsync-on-rewrite",
+        "no",
+        "--auto-aof-rewrite-percentage",
+        "0"
+      ],
+      "concurrency": 8,
+      "durability": "memory",
+      "engine": "redis",
+      "engine_identity_verification": {
+        "detected_signature": "redis-compatible",
+        "note": "redis_version alone does not distinguish all compatible servers",
+        "requested": "redis",
+        "status": "unverified"
+      },
+      "errors": [],
+      "items": 8192,
+      "ok": true,
+      "ownership": "owned child/tempdir",
+      "payload_bytes": 4096,
+      "persistence_verification": {
+        "errors": [],
+        "expected": {
+          "appendonly": "no",
+          "save": ""
+        },
+        "requested": "memory",
+        "settings": {
+          "appendonly": "no",
+          "save": ""
+        },
+        "status": "verified"
+      },
+      "phases": [
+        {
+          "attempted": 8192,
+          "completed": 8192,
+          "completed_ops_per_second": 134600.04595185744,
+          "elapsed_seconds": 0.060861792000650894,
+          "error_examples": [],
+          "errors": 0,
+          "latency_samples": 8192,
+          "latency_semantics": "send-start to each reply; includes pipeline queueing; no inferred per-command division",
+          "max_ms": 2.452084001561161,
+          "p50_ms": 0.37730052895373645,
+          "p95_ms": 0.8386436213543336,
+          "p99_ms": 1.0780577515567376,
+          "percentile_method": "measured logarithmic histogram upper bound; bucket ratio 2^(1/1024)",
+          "phase": "backlog_enqueue",
+          "retries": 0,
+          "unknown_outcomes": 0
+        },
+        {
+          "attempted": 8192,
+          "completed": 8192,
+          "completed_ops_per_second": 84610.6543492313,
+          "elapsed_seconds": 0.09681995799473953,
+          "error_examples": [],
+          "errors": 0,
+          "latency_samples": 8192,
+          "latency_semantics": "send-start to each reply; includes pipeline queueing; no inferred per-command division",
+          "max_ms": 2.2794579999754205,
+          "p50_ms": 0.4514302780213823,
+          "p95_ms": 1.024,
+          "p99_ms": 1.3858192992807914,
+          "percentile_method": "measured logarithmic histogram upper bound; bucket ratio 2^(1/1024)",
+          "phase": "cold_first_read",
+          "retries": 0,
+          "unknown_outcomes": 0
+        },
+        {
+          "attempted": 260912,
+          "completed": 260912,
+          "completed_ops_per_second": 86855.16377468096,
+          "elapsed_seconds": 3.0039895000008983,
+          "error_examples": [],
+          "errors": 0,
+          "latency_samples": 260912,
+          "latency_semantics": "send-start to each reply; includes pipeline queueing; no inferred per-command division",
+          "max_ms": 7.198083003459033,
+          "p50_ms": 0.4676030808444227,
+          "p95_ms": 1.0435932119836036,
+          "p99_ms": 1.3570423225955752,
+          "percentile_method": "measured logarithmic histogram upper bound; bucket ratio 2^(1/1024)",
+          "phase": "hot_repeat_read",
+          "retries": 0,
+          "unknown_outcomes": 0
+        },
+        {
+          "attempted": 4096,
+          "completed": 4096,
+          "completed_ops_per_second": 84275.57306713081,
+          "elapsed_seconds": 0.048602457995002624,
+          "error_examples": [],
+          "errors": 0,
+          "latency_samples": 4096,
+          "latency_semantics": "send-start to each reply; includes pipeline queueing; no inferred per-command division",
+          "max_ms": 1.759166996635031,
+          "p50_ms": 0.45020963586829194,
+          "p95_ms": 1.0219226683956426,
+          "p99_ms": 1.330663145962499,
+          "percentile_method": "measured logarithmic histogram upper bound; bucket ratio 2^(1/1024)",
+          "phase": "half_drain",
+          "retries": 0,
+          "unknown_outcomes": 0
+        },
+        {
+          "elapsed_seconds": 2.916996891144663e-06,
+          "errors": 0,
+          "phase": "compaction",
+          "reason": "memory-only Redis has no payload-store compaction",
+          "status": "not_applicable"
+        },
+        {
+          "attempted": 4096,
+          "completed": 4096,
+          "completed_ops_per_second": 86727.7529776586,
+          "elapsed_seconds": 0.04722825000499142,
+          "error_examples": [],
+          "errors": 0,
+          "latency_samples": 4096,
+          "latency_semantics": "send-start to each reply; includes pipeline queueing; no inferred per-command division",
+          "max_ms": 1.9458329988992773,
+          "p50_ms": 0.45081954381762146,
+          "p95_ms": 0.9905928774264164,
+          "p99_ms": 1.2863803533995595,
+          "percentile_method": "measured logarithmic histogram upper bound; bucket ratio 2^(1/1024)",
+          "phase": "final_drain",
+          "retries": 0,
+          "unknown_outcomes": 0
+        }
+      ],
+      "pipeline": 8,
+      "rss": [
+        {
+          "bytes": 7323648,
+          "monotonic_seconds": 38597.967790833,
+          "phase": "idle",
+          "source": "ps current RSS KiB"
+        },
+        {
+          "bytes": 51265536,
+          "monotonic_seconds": 38598.037035333,
+          "phase": "backlog",
+          "source": "ps current RSS KiB"
+        },
+        {
+          "bytes": 51445760,
+          "monotonic_seconds": 38601.201434166,
+          "phase": "half_drain",
+          "source": "ps current RSS KiB"
+        },
+        {
+          "bytes": 51445760,
+          "monotonic_seconds": 38601.205972541,
+          "phase": "post_compaction",
+          "source": "ps current RSS KiB"
+        },
+        {
+          "bytes": 51445760,
+          "monotonic_seconds": 38601.260574,
+          "phase": "drain",
+          "source": "ps current RSS KiB"
+        }
+      ],
+      "semantics": "LPUSH/LINDEX/LPOP Redis-compatible lists, remove-on-pop; no native ACK comparison",
+      "server_identity": {
+        "arch_bits": "64",
+        "atomicvar_api": "c11-builtin",
+        "config_file": "",
+        "configured_hz": "10",
+        "executable": "/opt/homebrew/bin/redis-server",
+        "gcc_version": "4.2.1",
+        "hz": "10",
+        "io_threads_active": "0",
+        "listener0": "name=tcp,bind=127.0.0.1,port=58255",
+        "lru_clock": "15245750",
+        "monotonic_clock": "POSIX clock_gettime",
+        "multiplexing_api": "kqueue",
+        "os": "Darwin 27.0.0 arm64",
+        "process_id": "56637",
+        "process_supervised": "no",
+        "redis_build_id": "dd46127e0d04fdb3",
+        "redis_git_dirty": "1",
+        "redis_git_sha1": "00000000",
+        "redis_mode": "standalone",
+        "redis_version": "8.2.1",
+        "run_id": "a323c9c699dca9080a33f469a2654ba36117d5fb",
+        "server_time_usec": "1793630646354339",
+        "tcp_port": "58255",
+        "uptime_in_days": "0",
+        "uptime_in_seconds": "0"
+      },
+      "socket_timeout_seconds": 30.0,
+      "storage": "memory"
+    },
+    {
+      "address": [
+        "127.0.0.1",
+        58300
+      ],
+      "cleanup_errors": [],
+      "cold_definition": "first LINDEX pass over backlog; OS cache NOT evicted",
+      "command_line": [
+        "/opt/homebrew/bin/redis-server",
+        "--bind",
+        "127.0.0.1",
+        "--port",
+        "58300",
+        "--protected-mode",
+        "yes",
+        "--dir",
+        "/var/folders/s7/pv15tmjx3rlg0_s43vb4bbsc0000gn/T/ffkv-benchmark-z3707w3y/redis-memory-memory-65536",
+        "--save",
+        "",
+        "--appendonly",
+        "no",
+        "--appendfsync",
+        "everysec",
+        "--no-appendfsync-on-rewrite",
+        "no",
+        "--auto-aof-rewrite-percentage",
+        "0"
+      ],
+      "concurrency": 8,
+      "durability": "memory",
+      "engine": "redis",
+      "engine_identity_verification": {
+        "detected_signature": "redis-compatible",
+        "note": "redis_version alone does not distinguish all compatible servers",
+        "requested": "redis",
+        "status": "unverified"
+      },
+      "errors": [],
+      "items": 8192,
+      "ok": true,
+      "ownership": "owned child/tempdir",
+      "payload_bytes": 65536,
+      "persistence_verification": {
+        "errors": [],
+        "expected": {
+          "appendonly": "no",
+          "save": ""
+        },
+        "requested": "memory",
+        "settings": {
+          "appendonly": "no",
+          "save": ""
+        },
+        "status": "verified"
+      },
+      "phases": [
+        {
+          "attempted": 8192,
+          "completed": 8192,
+          "completed_ops_per_second": 39461.60972869095,
+          "elapsed_seconds": 0.20759416699729627,
+          "error_examples": [],
+          "errors": 0,
+          "latency_samples": 8192,
+          "latency_semantics": "send-start to each reply; includes pipeline queueing; no inferred per-command division",
+          "max_ms": 5.845624997164123,
+          "p50_ms": 1.2863803533995595,
+          "p95_ms": 2.9397634867019873,
+          "p99_ms": 3.7433576739410785,
+          "percentile_method": "measured logarithmic histogram upper bound; bucket ratio 2^(1/1024)",
+          "phase": "backlog_enqueue",
+          "retries": 0,
+          "unknown_outcomes": 0
+        },
+        {
+          "attempted": 8192,
+          "completed": 8192,
+          "completed_ops_per_second": 27975.534466595404,
+          "elapsed_seconds": 0.29282729199621826,
+          "error_examples": [],
+          "errors": 0,
+          "latency_samples": 8192,
+          "latency_semantics": "send-start to each reply; includes pipeline queueing; no inferred per-command division",
+          "max_ms": 4.270542005542666,
+          "p50_ms": 1.3552063975309276,
+          "p95_ms": 2.4955744866865324,
+          "p99_ms": 2.953726053160303,
+          "percentile_method": "measured logarithmic histogram upper bound; bucket ratio 2^(1/1024)",
+          "phase": "cold_first_read",
+          "retries": 0,
+          "unknown_outcomes": 0
+        },
+        {
+          "attempted": 85912,
+          "completed": 85912,
+          "completed_ops_per_second": 28603.385481569174,
+          "elapsed_seconds": 3.003560541998013,
+          "error_examples": [],
+          "errors": 0,
+          "latency_samples": 85912,
+          "latency_semantics": "send-start to each reply; includes pipeline queueing; no inferred per-command division",
+          "max_ms": 8.74945800023852,
+          "p50_ms": 1.3181125175441641,
+          "p95_ms": 2.483777649744001,
+          "p99_ms": 2.941754090789189,
+          "percentile_method": "measured logarithmic histogram upper bound; bucket ratio 2^(1/1024)",
+          "phase": "hot_repeat_read",
+          "retries": 0,
+          "unknown_outcomes": 0
+        },
+        {
+          "attempted": 4096,
+          "completed": 4096,
+          "completed_ops_per_second": 27941.656265980262,
+          "elapsed_seconds": 0.14659116700204322,
+          "error_examples": [],
+          "errors": 0,
+          "latency_samples": 4096,
+          "latency_semantics": "send-start to each reply; includes pipeline queueing; no inferred per-command division",
+          "max_ms": 4.1761669999687,
+          "p50_ms": 1.3708912720734048,
+          "p95_ms": 2.4989552910858843,
+          "p99_ms": 2.9517273479754254,
+          "percentile_method": "measured logarithmic histogram upper bound; bucket ratio 2^(1/1024)",
+          "phase": "half_drain",
+          "retries": 0,
+          "unknown_outcomes": 0
+        },
+        {
+          "elapsed_seconds": 2.916996891144663e-06,
+          "errors": 0,
+          "phase": "compaction",
+          "reason": "memory-only Redis has no payload-store compaction",
+          "status": "not_applicable"
+        },
+        {
+          "attempted": 4096,
+          "completed": 4096,
+          "completed_ops_per_second": 27831.073673274102,
+          "elapsed_seconds": 0.14717362499504816,
+          "error_examples": [],
+          "errors": 0,
+          "latency_samples": 4096,
+          "latency_semantics": "send-start to each reply; includes pipeline queueing; no inferred per-command division",
+          "max_ms": 3.7006670027039945,
+          "p50_ms": 1.3533729562656334,
+          "p95_ms": 2.555404458491448,
+          "p99_ms": 3.0492077865459652,
+          "percentile_method": "measured logarithmic histogram upper bound; bucket ratio 2^(1/1024)",
+          "phase": "final_drain",
+          "retries": 0,
+          "unknown_outcomes": 0
+        }
+      ],
+      "pipeline": 8,
+      "rss": [
+        {
+          "bytes": 7258112,
+          "monotonic_seconds": 38601.428771,
+          "phase": "idle",
+          "source": "ps current RSS KiB"
+        },
+        {
+          "bytes": 547504128,
+          "monotonic_seconds": 38601.644853958,
+          "phase": "backlog",
+          "source": "ps current RSS KiB"
+        },
+        {
+          "bytes": 550633472,
+          "monotonic_seconds": 38605.101477041,
+          "phase": "half_drain",
+          "source": "ps current RSS KiB"
+        },
+        {
+          "bytes": 550633472,
+          "monotonic_seconds": 38605.106108458,
+          "phase": "post_compaction",
+          "source": "ps current RSS KiB"
+        },
+        {
+          "bytes": 550633472,
+          "monotonic_seconds": 38605.261105833,
+          "phase": "drain",
+          "source": "ps current RSS KiB"
+        }
+      ],
+      "semantics": "LPUSH/LINDEX/LPOP Redis-compatible lists, remove-on-pop; no native ACK comparison",
+      "server_identity": {
+        "arch_bits": "64",
+        "atomicvar_api": "c11-builtin",
+        "config_file": "",
+        "configured_hz": "10",
+        "executable": "/opt/homebrew/bin/redis-server",
+        "gcc_version": "4.2.1",
+        "hz": "10",
+        "io_threads_active": "0",
+        "listener0": "name=tcp,bind=127.0.0.1,port=58300",
+        "lru_clock": "15245753",
+        "monotonic_clock": "POSIX clock_gettime",
+        "multiplexing_api": "kqueue",
+        "os": "Darwin 27.0.0 arm64",
+        "process_id": "56669",
+        "process_supervised": "no",
+        "redis_build_id": "dd46127e0d04fdb3",
+        "redis_git_dirty": "1",
+        "redis_git_sha1": "00000000",
+        "redis_mode": "standalone",
+        "redis_version": "8.2.1",
+        "run_id": "e7e33b9b0e7729ac7ca7509d4da7107016de262b",
+        "server_time_usec": "1793630649813807",
+        "tcp_port": "58300",
+        "uptime_in_days": "0",
+        "uptime_in_seconds": "0"
+      },
+      "socket_timeout_seconds": 30.0,
+      "storage": "memory"
+    }
+  ],
+  "claims": "measured workload only; no absent engines tested; no advantage or long-duration claim",
+  "environment": {
+    "client": "stdlib RESP2 runtime.py",
+    "cpu_count": 10,
+    "machine": "arm64",
+    "os": "macOS-27.0.1-arm64-arm-64bit",
+    "python": "3.12.10"
+  },
+  "errors": [],
+  "invocation": [
+    "benchmarks/compare.py",
+    "--binary",
+    "target/release/ffkv",
+    "--modes",
+    "memory",
+    "--payloads",
+    "4096",
+    "65536",
+    "--items",
+    "8192",
+    "--concurrency",
+    "8",
+    "--pipeline",
+    "8",
+    "--duration",
+    "3",
+    "--timeout",
+    "30",
+    "--json",
+    "benchmarks/results/redis-vs-ffkv-2026-11-02/backlog-2.json"
+  ],
+  "ok": true,
+  "schema": 1,
+  "settings": {
+    "binary": "target/release/ffkv",
+    "cache_bytes": 1048576,
+    "concurrency": 8,
+    "csv": null,
+    "disk_budget": 0,
+    "duration": 3.0,
+    "external": [],
+    "external_durability": "strict",
+    "hot_items": 4,
+    "hot_operations": 256,
+    "inline_threshold": 1024,
+    "items": 8192,
+    "json": "benchmarks/results/redis-vs-ffkv-2026-11-02/backlog-2.json",
+    "maintenance_timeout": 120,
+    "modes": [
+      "memory"
+    ],
+    "payloads": [
+      4096,
+      65536
+    ],
+    "pipeline": 8,
+    "redis_binary": "redis-server",
+    "segment_bytes": 8388608,
+    "skip_redis": false,
+    "timeout": 30.0
+  },
+  "versions": {
+    "ffkv": {
+      "command": [
+        "target/release/ffkv",
+        "--version"
+      ],
+      "exit_code": 0,
+      "stderr": "",
+      "stdout": "ffkv 0.1.0"
+    },
+    "redis": {
+      "command": [
+        "/opt/homebrew/bin/redis-server",
+        "--version"
+      ],
+      "exit_code": 0,
+      "stderr": "",
+      "stdout": "Redis server v=8.2.1 sha=00000000:1 malloc=libc bits=64 build=dd46127e0d04fdb3"
+    }
+  }
+}

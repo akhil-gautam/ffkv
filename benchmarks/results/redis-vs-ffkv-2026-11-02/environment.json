@@ -1,0 +1,40 @@
+{
+  "date": "2026-11-02",
+  "source_commit": "062cf1487b6900abbb23a454506cbac8384a1082",
+  "cpu": "Apple M4",
+  "physical_cores": 10,
+  "logical_cpus": 10,
+  "memory_bytes": 17179869184,
+  "os": "macOS 27.0.1 (26A434)",
+  "architecture": "arm64",
+  "redis_version": "8.2.1",
+  "redis_allocator": "libc",
+  "cargo_version": "1.99.1 (5f94df478 2026-08-27)",
+  "ffkv_build": "cargo build --release --bin ffkv",
+  "ffkv_version": "0.1.0",
+  "load_generator_version": "redis-benchmark 8.2.1",
+  "power_at_start": "Battery Power, 85%, discharging",
+  "low_power_mode_enabled": true,
+  "swap_in_use_start_MiB": 268.0,
+  "load_average_at_start": [1.97, 2.87, 3.39],
+  "disk_free_at_start": "53 GiB",
+  "isolation": "Fresh child processes on loopback ephemeral ports, disposable data directories; no existing server touched",
+  "after_main_matrix": {
+    "power": "Battery Power, 77%, discharging",
+    "load_average": [7.44, 5.47, 4.88],
+    "swap_in_use_MiB": 268.0
+  },
+  "after_client_sensitivity": {
+    "power": "Battery Power, 76%, discharging",
+    "load_average": [3.28, 4.55, 4.60],
+    "swap_in_use_MiB": 268.0
+  },
+  "limitations": [
+    "Single developer workstation, not isolated production hardware",
+    "Client and server share this machine; no CPU affinity or performance governor changes",
+    "Existing user applications remain running",
+    "Battery power may influence frequency and thermal behavior",
+    "Memory-only, everysec and strict durability are reported separately",
+    "No claim about power-loss correctness, HA, remote network performance or beyond-RAM capacity"
+  ]
+}
