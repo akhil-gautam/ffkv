@@ -12,6 +12,8 @@
     "check": "astro check",
     "prebuild": "npm run generate",
     "build": "astro build && node scripts/check-site.mjs",
+    "build:pages": "DOCS_SITE=https://ffkv.pages.dev DOCS_BASE=/ npm run build",
+    "deploy:pages": "npm run build:pages && CLOUDFLARE_ACCOUNT_ID=e1ef3690abb20db115d224e44686a535 npx --yes --package wrangler@4.156.1 -- wrangler pages deploy --branch main",
     "preview": "astro preview",
     "check:site": "node scripts/check-site.mjs"
   },

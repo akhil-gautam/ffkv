@@ -12,7 +12,7 @@ Brand assets: [wordmark](apps/docs/public/brand/ffkv-wordmark.svg) · [symbol](a
 
 ## Documentation site
 
-**Public handbook: [ffkv-docs.akhilgautam.workers.dev](https://ffkv-docs.akhilgautam.workers.dev/).**
+**Public handbook: [ffkv.pages.dev](https://ffkv.pages.dev/).**
 
 The Astro + Starlight handbook lives in [`apps/docs`](apps/docs). It includes
 installation and operator guides, all 19 datatype families, a searchable generated
@@ -50,15 +50,16 @@ audit. Static output is `apps/docs/dist/`. Set `DOCS_SITE` to the deployment ori
 and optional `DOCS_BASE` to a project subpath before building; see the site's
 **Deploy → Documentation site** guide for static-host and subpath instructions.
 
-Production hosting uses Cloudflare Workers Static Assets. To rebuild, audit and
-deploy using your authenticated Wrangler account:
+Production hosting uses Cloudflare Pages. To rebuild, audit and deploy using your
+authenticated Wrangler account:
 
 ```sh
-npx --yes --package node@22.23.4 --package wrangler@4.156.1 -- wrangler --cwd apps/docs deploy
+npx --yes --package node@22.23.4 -- npm --prefix apps/docs run deploy:pages
 ```
 
-The target account, Worker and production build origin are pinned in
-`apps/docs/wrangler.jsonc`. GitHub CI validates builds; publication is manual.
+The Pages project and output directory are pinned in `apps/docs/wrangler.jsonc`;
+the deployment account and production origin are pinned in the `deploy:pages`
+and `build:pages` package scripts. GitHub CI validates builds; publication is manual.
 
 ## MCP integration
 

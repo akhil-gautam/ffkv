@@ -1,14 +1,5 @@
 {
-  "name": "ffkv-docs",
-  "account_id": "e1ef3690abb20db115d224e44686a535",
+  "name": "ffkv",
   "compatibility_date": "2026-11-02",
-  "workers_dev": true,
-  "build": {
-    "command": "DOCS_SITE=https://ffkv-docs.akhilgautam.workers.dev DOCS_BASE=/ npm run build"
-  },
-  "assets": {
-    "directory": "./dist",
-    "html_handling": "force-trailing-slash",
-    "not_found_handling": "404-page"
-  }
+  "pages_build_output_dir": "./dist"
 }

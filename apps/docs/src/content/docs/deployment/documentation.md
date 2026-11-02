@@ -59,15 +59,15 @@ another supervisor, append `-- --ignore-lock`; the supervisor then owns shutdown
 
 ## Cloudflare production deployment
 
-The public handbook is hosted at **[ffkv-docs.akhilgautam.workers.dev](https://ffkv-docs.akhilgautam.workers.dev/)** using [Cloudflare Workers Static Assets](https://developers.cloudflare.com/workers/static-assets/get-started/).
+The public handbook is hosted at **[ffkv.pages.dev](https://ffkv.pages.dev/)** using [Cloudflare Pages](https://developers.cloudflare.com/pages/configuration/serving-pages/).
 
-`apps/docs/wrangler.jsonc` pins the `ffkv-docs` Worker and its Cloudflare account. It serves only the generated documentation; it does not deploy the KV server, management console or repository source.
+`apps/docs/wrangler.jsonc` pins the `ffkv` Pages project and its static output directory. The `build:pages` and `deploy:pages` scripts in `apps/docs/package.json` pin the production origin and Cloudflare account. This deployment serves only generated documentation; it does not deploy the KV server, management console or repository source.
 
 From the repository root, install the locked documentation dependencies and deploy:
 
 ```sh
 npx --yes --package node@22.23.4 -- npm --prefix apps/docs ci
-npx --yes --package node@22.23.4 --package wrangler@4.156.1 -- wrangler --cwd apps/docs deploy
+npx --yes --package node@22.23.4 -- npm --prefix apps/docs run deploy:pages
 ```
 
 On a machine not yet authenticated to the deployment account, first run:
@@ -76,9 +76,9 @@ On a machine not yet authenticated to the deployment account, first run:
 npx --yes --package node@22.23.4 --package wrangler@4.156.1 -- wrangler login
 ```
 
-Wrangler's custom build sets `DOCS_SITE` to the public origin and `DOCS_BASE=/`, regenerates the reference, builds the search index and runs the full site integrity audit before uploading `dist`. The hosting configuration preserves trailing-slash routes and serves the generated error page with HTTP 404 for missing paths, rather than an SPA fallback.
+`deploy:pages` runs `build:pages`, which sets `DOCS_SITE=https://ffkv.pages.dev` and `DOCS_BASE=/`, regenerates the reference, builds the search index and runs the full site integrity audit. Only a successful build is uploaded to the Pages project's `main` production branch. Pages serves directory indexes at trailing-slash routes; the generated top-level `404.html` supplies real HTTP 404 responses for missing paths instead of an SPA fallback.
 
-Deployment is manual: pushing to GitHub runs documentation CI but does not publish to Cloudflare. To deploy a fork or change the public hostname, update the Worker name, account and build origin in `wrangler.jsonc` together. Authentication stays in Wrangler's local credentials or the deploying environment, never in the repository.
+Deployment is manual: pushing to GitHub runs documentation CI but does not publish to Cloudflare. To deploy a fork or change the public hostname, update the Pages project in `wrangler.jsonc` and the account and build origin in the package scripts together. Authentication stays in Wrangler's local credentials or the deploying environment, never in the repository.
 
 ## Publish at a domain root
 
@@ -131,7 +131,7 @@ Serve directories through their `index.html`, and serve `404.html` with **HTTP 4
 
 Keep the entire output, including `_astro`, `pagefind`, sitemap and favicon assets. Pagefind runs in the browser and fetches its local index/chunks; dropping that directory breaks production search. Use HTTPS on the public host, compress text assets, and allow `.wasm` with the `application/wasm` content type when the search build emits WebAssembly.
 
-The Cloudflare target is configured in `apps/docs/wrangler.jsonc`; no deployment credential is stored in the repository. Other hosting providers require their own publication setup. Local builds and previews need no hosting credentials.
+The Cloudflare Pages target is configured in `apps/docs/wrangler.jsonc` and the package deployment scripts; no deployment credential is stored in the repository. Other hosting providers require their own publication setup. Local builds and previews need no hosting credentials.
 
 ## Maintain the content
 
