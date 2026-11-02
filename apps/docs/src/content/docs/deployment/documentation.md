@@ -16,7 +16,7 @@ npm --prefix apps/docs ci
 npm --prefix apps/docs run dev
 ```
 
-Open **http://localhost:4321**. The development server binds loopback and refuses an occupied port instead of silently using a different one. Stop only this process with Ctrl-C. It does not manage any KV processes or data directories.
+Open `http://localhost:4321`. The development server binds loopback and refuses an occupied port instead of silently using a different one. Stop only this process with Ctrl-C. It does not manage any KV processes or data directories.
 
 The pinned current Astro release requires this Node patch level. If your global
 Node is older, npm can provide an isolated runtime without replacing it:
@@ -113,6 +113,8 @@ No production host account, domain, certificate or deployment credential is conf
 ## Maintain the content
 
 Handwritten guides live in `apps/docs/src/content/docs`. Each has a frontmatter `title` and `description`; Starlight renders the page heading. Author internal Markdown links from the documentation root with a trailing slash, such as `/operations/persistence/`. The build's link transform adds `DOCS_BASE` automatically. Astro modules use `docsLink` from `src/lib/links.ts`.
+
+Keep local development URL examples in inline code rather than clickable links. A localhost example can share the development build's origin while falling outside a configured project subpath; it is an instruction for the reader, not site navigation.
 
 The command reference is generated automatically before `dev`, `check` and `build`:
 
