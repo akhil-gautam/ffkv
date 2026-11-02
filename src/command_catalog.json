@@ -1,0 +1,3894 @@
+{
+  "version": "8.10.0",
+  "source": "https://redis.io/docs/latest/commands/redis-8-10-commands/",
+  "commands": [
+    {
+      "name": "APPEND",
+      "group": "String commands",
+      "url": "https://redis.io/commands/append/",
+      "syntax": "APPEND key value",
+      "description": "Appends a string to the value of a key. Creates the key if it doesn't exist.",
+      "since": "2.0.0"
+    },
+    {
+      "name": "DECR",
+      "group": "String commands",
+      "url": "https://redis.io/commands/decr/",
+      "syntax": "DECR key",
+      "description": "Decrements the integer value of a key by one. Uses 0 as initial value if the key doesn't exist.",
+      "since": "1.0.0"
+    },
+    {
+      "name": "DECRBY",
+      "group": "String commands",
+      "url": "https://redis.io/commands/decrby/",
+      "syntax": "DECRBY key decrement",
+      "description": "Decrements a number from the integer value of a key. Uses 0 as initial value if the key doesn't exist.",
+      "since": "1.0.0"
+    },
+    {
+      "name": "DELEX",
+      "group": "String commands",
+      "url": "https://redis.io/commands/delex/",
+      "syntax": "DELEX key [IFEQ ifeq-value | IFNE ifne-value | IFDEQ ifdeq-digest |\n  IFDNE ifdne-digest]",
+      "description": "Conditionally removes the specified key based on value or hash digest comparison.",
+      "since": "8.4.0"
+    },
+    {
+      "name": "DIGEST",
+      "group": "String commands",
+      "url": "https://redis.io/commands/digest/",
+      "syntax": "DIGEST key",
+      "description": "Returns the hash digest of a string value as a hexadecimal string.",
+      "since": "8.4.0"
+    },
+    {
+      "name": "GET",
+      "group": "String commands",
+      "url": "https://redis.io/commands/get/",
+      "syntax": "GET key",
+      "description": "Returns the string value of a key.",
+      "since": "1.0.0"
+    },
+    {
+      "name": "GETDEL",
+      "group": "String commands",
+      "url": "https://redis.io/commands/getdel/",
+      "syntax": "GETDEL key",
+      "description": "Returns the string value of a key after deleting the key.",
+      "since": "6.2.0"
+    },
+    {
+      "name": "GETEX",
+      "group": "String commands",
+      "url": "https://redis.io/commands/getex/",
+      "syntax": "GETEX key [EX seconds | PX milliseconds | EXAT unix-time-seconds |\n  PXAT unix-time-milliseconds | PERSIST]",
+      "description": "Returns the string value of a key after setting its expiration time.",
+      "since": "6.2.0"
+    },
+    {
+      "name": "GETRANGE",
+      "group": "String commands",
+      "url": "https://redis.io/commands/getrange/",
+      "syntax": "GETRANGE key start end",
+      "description": "Returns a substring of the string stored at a key.",
+      "since": "2.4.0"
+    },
+    {
+      "name": "GETSET",
+      "group": "String commands",
+      "url": "https://redis.io/commands/getset/",
+      "syntax": "GETSET key value",
+      "description": "Returns the previous string value of a key after setting it to a new value.",
+      "since": "1.0.0"
+    },
+    {
+      "name": "INCR",
+      "group": "String commands",
+      "url": "https://redis.io/commands/incr/",
+      "syntax": "INCR key",
+      "description": "Increments the integer value of a key by one. Uses 0 as initial value if the key doesn't exist.",
+      "since": "1.0.0"
+    },
+    {
+      "name": "INCRBY",
+      "group": "String commands",
+      "url": "https://redis.io/commands/incrby/",
+      "syntax": "INCRBY key increment",
+      "description": "Increments the integer value of a key by a number. Uses 0 as initial value if the key doesn't exist.",
+      "since": "1.0.0"
+    },
+    {
+      "name": "INCRBYFLOAT",
+      "group": "String commands",
+      "url": "https://redis.io/commands/incrbyfloat/",
+      "syntax": "INCRBYFLOAT key increment",
+      "description": "Increment the floating point value of a key by a number. Uses 0 as initial value if the key doesn't exist.",
+      "since": "2.6.0"
+    },
+    {
+      "name": "INCREX",
+      "group": "String commands",
+      "url": "https://redis.io/commands/increx/",
+      "syntax": "INCREX key [BYFLOAT increment | BYINT increment]\n [LBOUND lowerbound] [UBOUND upperbound] [SATURATE]\n [EX seconds | PX milliseconds | EXAT unix-time-seconds| PXAT unix-time-milliseconds | PERSIST] [ENX]",
+      "description": "Increments the numeric value of a key by a number and sets its expiration time. Uses 0 as initial value if the key doesn't exist.",
+      "since": "8.8.0"
+    },
+    {
+      "name": "LCS",
+      "group": "String commands",
+      "url": "https://redis.io/commands/lcs/",
+      "syntax": "LCS key1 key2 [LEN] [IDX] [MINMATCHLEN min-match-len] [WITHMATCHLEN]",
+      "description": "Finds the longest common substring.",
+      "since": "7.0.0"
+    },
+    {
+      "name": "MGET",
+      "group": "String commands",
+      "url": "https://redis.io/commands/mget/",
+      "syntax": "MGET key [key ...]",
+      "description": "Atomically returns the string values of one or more keys.",
+      "since": "1.0.0"
+    },
+    {
+      "name": "MSET",
+      "group": "String commands",
+      "url": "https://redis.io/commands/mset/",
+      "syntax": "MSET key value [key value ...]",
+      "description": "Atomically creates or modifies the string values of one or more keys.",
+      "since": "1.0.1"
+    },
+    {
+      "name": "MSETEX",
+      "group": "String commands",
+      "url": "https://redis.io/commands/msetex/",
+      "syntax": "MSETEX numkeys key value [key value ...] [NX | XX] [EX seconds |\n  PX milliseconds | EXAT unix-time-seconds |\n  PXAT unix-time-milliseconds | KEEPTTL]",
+      "description": "Atomically sets multiple string keys with a shared expiration in a single operation.",
+      "since": "8.4.0"
+    },
+    {
+      "name": "MSETNX",
+      "group": "String commands",
+      "url": "https://redis.io/commands/msetnx/",
+      "syntax": "MSETNX key value [key value ...]",
+      "description": "Atomically modifies the string values of one or more keys only when all keys don't exist.",
+      "since": "1.0.1"
+    },
+    {
+      "name": "PSETEX",
+      "group": "String commands",
+      "url": "https://redis.io/commands/psetex/",
+      "syntax": "PSETEX key milliseconds value",
+      "description": "Sets both string value and expiration time in milliseconds of a key. The key is created if it doesn't exist.",
+      "since": "2.6.0"
+    },
+    {
+      "name": "SET",
+      "group": "String commands",
+      "url": "https://redis.io/commands/set/",
+      "syntax": "SET key value [NX | XX | IFEQ ifeq-value | IFNE ifne-value |\n  IFDEQ ifdeq-digest | IFDNE ifdne-digest] [GET] [EX seconds |\n  PX milliseconds | EXAT unix-time-seconds |\n  PXAT unix-time-milliseconds | KEEPTTL]",
+      "description": "Sets the string value of a key, ignoring its type. The key is created if it doesn't exist.",
+      "since": "1.0.0"
+    },
+    {
+      "name": "SETEX",
+      "group": "String commands",
+      "url": "https://redis.io/commands/setex/",
+      "syntax": "SETEX key seconds value",
+      "description": "Sets the string value and expiration time of a key. Creates the key if it doesn't exist.",
+      "since": "2.0.0"
+    },
+    {
+      "name": "SETNX",
+      "group": "String commands",
+      "url": "https://redis.io/commands/setnx/",
+      "syntax": "SETNX key value",
+      "description": "Set the string value of a key only when the key doesn't exist.",
+      "since": "1.0.0"
+    },
+    {
+      "name": "SETRANGE",
+      "group": "String commands",
+      "url": "https://redis.io/commands/setrange/",
+      "syntax": "SETRANGE key offset value",
+      "description": "Overwrites a part of a string value with another by an offset. Creates the key if it doesn't exist.",
+      "since": "2.2.0"
+    },
+    {
+      "name": "STRLEN",
+      "group": "String commands",
+      "url": "https://redis.io/commands/strlen/",
+      "syntax": "STRLEN key",
+      "description": "Returns the length of a string value.",
+      "since": "2.2.0"
+    },
+    {
+      "name": "SUBSTR",
+      "group": "String commands",
+      "url": "https://redis.io/commands/substr/",
+      "syntax": "SUBSTR key start end",
+      "description": "Returns a substring from a string value.",
+      "since": "1.0.0"
+    },
+    {
+      "name": "HDEL",
+      "group": "Hash commands",
+      "url": "https://redis.io/commands/hdel/",
+      "syntax": "HDEL key field [field ...]",
+      "description": "Deletes one or more fields and their values from a hash. Deletes the hash if no fields remain.",
+      "since": "2.0.0"
+    },
+    {
+      "name": "HEXISTS",
+      "group": "Hash commands",
+      "url": "https://redis.io/commands/hexists/",
+      "syntax": "HEXISTS key field",
+      "description": "Determines whether a field exists in a hash.",
+      "since": "2.0.0"
+    },
+    {
+      "name": "HEXPIRE",
+      "group": "Hash commands",
+      "url": "https://redis.io/commands/hexpire/",
+      "syntax": "HEXPIRE key seconds [NX | XX | GT | LT] FIELDS numfields field\n  [field ...]",
+      "description": "Set expiry for hash field using relative time to expire (seconds)",
+      "since": "7.4.0"
+    },
+    {
+      "name": "HEXPIREAT",
+      "group": "Hash commands",
+      "url": "https://redis.io/commands/hexpireat/",
+      "syntax": "HEXPIREAT key unix-time-seconds [NX | XX | GT | LT] FIELDS numfields\n  field [field ...]",
+      "description": "Set expiry for hash field using an absolute Unix timestamp (seconds)",
+      "since": "7.4.0"
+    },
+    {
+      "name": "HEXPIRETIME",
+      "group": "Hash commands",
+      "url": "https://redis.io/commands/hexpiretime/",
+      "syntax": "HEXPIRETIME key FIELDS numfields field [field ...]",
+      "description": "Returns the expiration time of a hash field as a Unix timestamp, in seconds.",
+      "since": "7.4.0"
+    },
+    {
+      "name": "HGET",
+      "group": "Hash commands",
+      "url": "https://redis.io/commands/hget/",
+      "syntax": "HGET key field",
+      "description": "Returns the value of a field in a hash.",
+      "since": "2.0.0"
+    },
+    {
+      "name": "HGETALL",
+      "group": "Hash commands",
+      "url": "https://redis.io/commands/hgetall/",
+      "syntax": "HGETALL key",
+      "description": "Returns all fields and values in a hash.",
+      "since": "2.0.0"
+    },
+    {
+      "name": "HGETDEL",
+      "group": "Hash commands",
+      "url": "https://redis.io/commands/hgetdel/",
+      "syntax": "HGETDEL key FIELDS numfields field [field ...]",
+      "description": "Returns the value of a field and deletes it from the hash.",
+      "since": "8.0.0"
+    },
+    {
+      "name": "HGETEX",
+      "group": "Hash commands",
+      "url": "https://redis.io/commands/hgetex/",
+      "syntax": "HGETEX key [EX seconds | PX milliseconds | EXAT unix-time-seconds |\n  PXAT unix-time-milliseconds | PERSIST] FIELDS numfields field\n  [field ...]",
+      "description": "Get the value of one or more fields of a given hash key, and optionally set their expiration.",
+      "since": "8.0.0"
+    },
+    {
+      "name": "HIMPORT",
+      "group": "Hash commands",
+      "url": "https://redis.io/commands/himport/",
+      "syntax": "HIMPORT",
+      "description": "A container for session-based hash import commands using fieldsets.",
+      "since": "8.10.0"
+    },
+    {
+      "name": "HIMPORT DISCARD",
+      "group": "Hash commands",
+      "url": "https://redis.io/commands/himport-discard/",
+      "syntax": "HIMPORT DISCARD fieldset-name",
+      "description": "Removes a single session-local fieldset by name.",
+      "since": "8.10.0"
+    },
+    {
+      "name": "HIMPORT DISCARDALL",
+      "group": "Hash commands",
+      "url": "https://redis.io/commands/himport-discardall/",
+      "syntax": "HIMPORT DISCARDALL",
+      "description": "Removes all session-local fieldsets for the connection.",
+      "since": "8.10.0"
+    },
+    {
+      "name": "HIMPORT PREPARE",
+      "group": "Hash commands",
+      "url": "https://redis.io/commands/himport-prepare/",
+      "syntax": "HIMPORT PREPARE fieldset-name field [field ...]",
+      "description": "Defines a session-local fieldset that maps a name to a sorted set of field names.",
+      "since": "8.10.0"
+    },
+    {
+      "name": "HIMPORT SET",
+      "group": "Hash commands",
+      "url": "https://redis.io/commands/himport-set/",
+      "syntax": "HIMPORT SET key fieldset-name value [value ...]",
+      "description": "Creates a fieldset-based hash from values supplied in the order matching a previously prepared fieldset.",
+      "since": "8.10.0"
+    },
+    {
+      "name": "HINCRBY",
+      "group": "Hash commands",
+      "url": "https://redis.io/commands/hincrby/",
+      "syntax": "HINCRBY key field increment",
+      "description": "Increments the integer value of a field in a hash by a number. Uses 0 as initial value if the field doesn't exist.",
+      "since": "2.0.0"
+    },
+    {
+      "name": "HINCRBYFLOAT",
+      "group": "Hash commands",
+      "url": "https://redis.io/commands/hincrbyfloat/",
+      "syntax": "HINCRBYFLOAT key field increment",
+      "description": "Increments the floating point value of a field by a number. Uses 0 as initial value if the field doesn't exist.",
+      "since": "2.6.0"
+    },
+    {
+      "name": "HKEYS",
+      "group": "Hash commands",
+      "url": "https://redis.io/commands/hkeys/",
+      "syntax": "HKEYS key",
+      "description": "Returns all fields in a hash.",
+      "since": "2.0.0"
+    },
+    {
+      "name": "HLEN",
+      "group": "Hash commands",
+      "url": "https://redis.io/commands/hlen/",
+      "syntax": "HLEN key",
+      "description": "Returns the number of fields in a hash.",
+      "since": "2.0.0"
+    },
+    {
+      "name": "HMGET",
+      "group": "Hash commands",
+      "url": "https://redis.io/commands/hmget/",
+      "syntax": "HMGET key field [field ...]",
+      "description": "Returns the values of all fields in a hash.",
+      "since": "2.0.0"
+    },
+    {
+      "name": "HMSET",
+      "group": "Hash commands",
+      "url": "https://redis.io/commands/hmset/",
+      "syntax": "HMSET key field value [field value ...]",
+      "description": "Sets the values of multiple fields.",
+      "since": "2.0.0"
+    },
+    {
+      "name": "HPERSIST",
+      "group": "Hash commands",
+      "url": "https://redis.io/commands/hpersist/",
+      "syntax": "HPERSIST key FIELDS numfields field [field ...]",
+      "description": "Removes the expiration time for each specified field",
+      "since": "7.4.0"
+    },
+    {
+      "name": "HPEXPIRE",
+      "group": "Hash commands",
+      "url": "https://redis.io/commands/hpexpire/",
+      "syntax": "HPEXPIRE key milliseconds [NX | XX | GT | LT] FIELDS numfields field\n  [field ...]",
+      "description": "Set expiry for hash field using relative time to expire (milliseconds)",
+      "since": "7.4.0"
+    },
+    {
+      "name": "HPEXPIREAT",
+      "group": "Hash commands",
+      "url": "https://redis.io/commands/hpexpireat/",
+      "syntax": "HPEXPIREAT key unix-time-milliseconds [NX | XX | GT | LT]\n  FIELDS numfields field [field ...]",
+      "description": "Set expiry for hash field using an absolute Unix timestamp (milliseconds)",
+      "since": "7.4.0"
+    },
+    {
+      "name": "HPEXPIRETIME",
+      "group": "Hash commands",
+      "url": "https://redis.io/commands/hpexpiretime/",
+      "syntax": "HPEXPIRETIME key FIELDS numfields field [field ...]",
+      "description": "Returns the expiration time of a hash field as a Unix timestamp, in msec.",
+      "since": "7.4.0"
+    },
+    {
+      "name": "HPTTL",
+      "group": "Hash commands",
+      "url": "https://redis.io/commands/hpttl/",
+      "syntax": "HPTTL key FIELDS numfields field [field ...]",
+      "description": "Returns the TTL in milliseconds of a hash field.",
+      "since": "7.4.0"
+    },
+    {
+      "name": "HRANDFIELD",
+      "group": "Hash commands",
+      "url": "https://redis.io/commands/hrandfield/",
+      "syntax": "HRANDFIELD key [count [WITHVALUES]]",
+      "description": "Returns one or more random fields from a hash.",
+      "since": "6.2.0"
+    },
+    {
+      "name": "HSCAN",
+      "group": "Hash commands",
+      "url": "https://redis.io/commands/hscan/",
+      "syntax": "HSCAN key cursor [MATCH pattern] [COUNT count] [NOVALUES]",
+      "description": "Iterates over fields and values of a hash.",
+      "since": "2.8.0"
+    },
+    {
+      "name": "HSET",
+      "group": "Hash commands",
+      "url": "https://redis.io/commands/hset/",
+      "syntax": "HSET key field value [field value ...]",
+      "description": "Creates or modifies the value of a field in a hash.",
+      "since": "2.0.0"
+    },
+    {
+      "name": "HSETEX",
+      "group": "Hash commands",
+      "url": "https://redis.io/commands/hsetex/",
+      "syntax": "HSETEX key [FNX | FXX] [EX seconds | PX milliseconds |\n  EXAT unix-time-seconds | PXAT unix-time-milliseconds | KEEPTTL]\n  FIELDS numfields field value [field value ...]",
+      "description": "Set the value of one or more fields of a given hash key, and optionally set their expiration.",
+      "since": "8.0.0"
+    },
+    {
+      "name": "HSETNX",
+      "group": "Hash commands",
+      "url": "https://redis.io/commands/hsetnx/",
+      "syntax": "HSETNX key field value",
+      "description": "Sets the value of a field in a hash only when the field doesn't exist.",
+      "since": "2.0.0"
+    },
+    {
+      "name": "HSTRLEN",
+      "group": "Hash commands",
+      "url": "https://redis.io/commands/hstrlen/",
+      "syntax": "HSTRLEN key field",
+      "description": "Returns the length of the value of a field.",
+      "since": "3.2.0"
+    },
+    {
+      "name": "HTTL",
+      "group": "Hash commands",
+      "url": "https://redis.io/commands/httl/",
+      "syntax": "HTTL key FIELDS numfields field [field ...]",
+      "description": "Returns the TTL in seconds of a hash field.",
+      "since": "7.4.0"
+    },
+    {
+      "name": "HVALS",
+      "group": "Hash commands",
+      "url": "https://redis.io/commands/hvals/",
+      "syntax": "HVALS key",
+      "description": "Returns all values in a hash.",
+      "since": "2.0.0"
+    },
+    {
+      "name": "BLMOVE",
+      "group": "List commands",
+      "url": "https://redis.io/commands/blmove/",
+      "syntax": "BLMOVE source destination <LEFT | RIGHT> <LEFT | RIGHT> timeout",
+      "description": "Pops an element from a list, pushes it to another list and returns it. Blocks until an element is available otherwise. Deletes the list if the last element was moved.",
+      "since": "6.2.0"
+    },
+    {
+      "name": "BLMOVEM",
+      "group": "List commands",
+      "url": "https://redis.io/commands/blmovem/",
+      "syntax": "BLMOVEM source destination <LEFT | RIGHT> <LEFT | RIGHT> timeout\n  [<COUNT count | EXACTLY exactly> <OBO | BULK>]",
+      "description": "Moves up to (or exactly) a number of elements from one list to another and returns them. Blocks until the elements are available otherwise. Deletes the source list if it becomes empty.",
+      "since": "8.10.0"
+    },
+    {
+      "name": "BLMPOP",
+      "group": "List commands",
+      "url": "https://redis.io/commands/blmpop/",
+      "syntax": "BLMPOP timeout numkeys key [key ...] <LEFT | RIGHT> [COUNT count]",
+      "description": "Pops the first element from one of multiple lists. Blocks until an element is available otherwise. Deletes the list if the last element was popped.",
+      "since": "7.0.0"
+    },
+    {
+      "name": "BLPOP",
+      "group": "List commands",
+      "url": "https://redis.io/commands/blpop/",
+      "syntax": "BLPOP key [key ...] timeout",
+      "description": "Removes and returns the first element in a list. Blocks until an element is available otherwise. Deletes the list if the last element was popped.",
+      "since": "2.0.0"
+    },
+    {
+      "name": "BRPOP",
+      "group": "List commands",
+      "url": "https://redis.io/commands/brpop/",
+      "syntax": "BRPOP key [key ...] timeout",
+      "description": "Removes and returns the last element in a list. Blocks until an element is available otherwise. Deletes the list if the last element was popped.",
+      "since": "2.0.0"
+    },
+    {
+      "name": "BRPOPLPUSH",
+      "group": "List commands",
+      "url": "https://redis.io/commands/brpoplpush/",
+      "syntax": "BRPOPLPUSH source destination timeout",
+      "description": "Pops an element from a list, pushes it to another list and returns it. Block until an element is available otherwise. Deletes the list if the last element was popped.",
+      "since": "2.2.0"
+    },
+    {
+      "name": "LINDEX",
+      "group": "List commands",
+      "url": "https://redis.io/commands/lindex/",
+      "syntax": "LINDEX key index",
+      "description": "Returns an element from a list by its index.",
+      "since": "1.0.0"
+    },
+    {
+      "name": "LINSERT",
+      "group": "List commands",
+      "url": "https://redis.io/commands/linsert/",
+      "syntax": "LINSERT key <BEFORE | AFTER> pivot element",
+      "description": "Inserts an element before or after another element in a list.",
+      "since": "2.2.0"
+    },
+    {
+      "name": "LLEN",
+      "group": "List commands",
+      "url": "https://redis.io/commands/llen/",
+      "syntax": "LLEN key",
+      "description": "Returns the length of a list.",
+      "since": "1.0.0"
+    },
+    {
+      "name": "LMOVE",
+      "group": "List commands",
+      "url": "https://redis.io/commands/lmove/",
+      "syntax": "LMOVE source destination <LEFT | RIGHT> <LEFT | RIGHT>",
+      "description": "Returns an element after popping it from one list and pushing it to another. Deletes the list if the last element was moved.",
+      "since": "6.2.0"
+    },
+    {
+      "name": "LMOVEM",
+      "group": "List commands",
+      "url": "https://redis.io/commands/lmovem/",
+      "syntax": "LMOVEM source destination <LEFT | RIGHT> <LEFT | RIGHT>\n  [<COUNT count | EXACTLY exactly> <OBO | BULK>]",
+      "description": "Moves up to (or exactly) a number of elements from one list to another and returns them. Deletes the source list if it becomes empty.",
+      "since": "8.10.0"
+    },
+    {
+      "name": "LMPOP",
+      "group": "List commands",
+      "url": "https://redis.io/commands/lmpop/",
+      "syntax": "LMPOP numkeys key [key ...] <LEFT | RIGHT> [COUNT count]",
+      "description": "Returns multiple elements from a list after removing them. Deletes the list if the last element was popped.",
+      "since": "7.0.0"
+    },
+    {
+      "name": "LPOP",
+      "group": "List commands",
+      "url": "https://redis.io/commands/lpop/",
+      "syntax": "LPOP key [count]",
+      "description": "Returns the first elements in a list after removing it. Deletes the list if the last element was popped.",
+      "since": "1.0.0"
+    },
+    {
+      "name": "LPOS",
+      "group": "List commands",
+      "url": "https://redis.io/commands/lpos/",
+      "syntax": "LPOS key element [RANK rank] [COUNT num-matches] [MAXLEN len]",
+      "description": "Returns the index of matching elements in a list.",
+      "since": "6.0.6"
+    },
+    {
+      "name": "LPUSH",
+      "group": "List commands",
+      "url": "https://redis.io/commands/lpush/",
+      "syntax": "LPUSH key element [element ...]",
+      "description": "Prepends one or more elements to a list. Creates the key if it doesn't exist.",
+      "since": "1.0.0"
+    },
+    {
+      "name": "LPUSHX",
+      "group": "List commands",
+      "url": "https://redis.io/commands/lpushx/",
+      "syntax": "LPUSHX key element [element ...]",
+      "description": "Prepends one or more elements to a list only when the list exists.",
+      "since": "2.2.0"
+    },
+    {
+      "name": "LRANGE",
+      "group": "List commands",
+      "url": "https://redis.io/commands/lrange/",
+      "syntax": "LRANGE key start stop",
+      "description": "Returns a range of elements from a list.",
+      "since": "1.0.0"
+    },
+    {
+      "name": "LREM",
+      "group": "List commands",
+      "url": "https://redis.io/commands/lrem/",
+      "syntax": "LREM key count element",
+      "description": "Removes elements from a list. Deletes the list if the last element was removed.",
+      "since": "1.0.0"
+    },
+    {
+      "name": "LSET",
+      "group": "List commands",
+      "url": "https://redis.io/commands/lset/",
+      "syntax": "LSET key index element",
+      "description": "Sets the value of an element in a list by its index.",
+      "since": "1.0.0"
+    },
+    {
+      "name": "LTRIM",
+      "group": "List commands",
+      "url": "https://redis.io/commands/ltrim/",
+      "syntax": "LTRIM key start stop",
+      "description": "Removes elements from both ends a list. Deletes the list if all elements were trimmed.",
+      "since": "1.0.0"
+    },
+    {
+      "name": "RPOP",
+      "group": "List commands",
+      "url": "https://redis.io/commands/rpop/",
+      "syntax": "RPOP key [count]",
+      "description": "Returns and removes the last elements of a list. Deletes the list if the last element was popped.",
+      "since": "1.0.0"
+    },
+    {
+      "name": "RPOPLPUSH",
+      "group": "List commands",
+      "url": "https://redis.io/commands/rpoplpush/",
+      "syntax": "RPOPLPUSH source destination",
+      "description": "Returns the last element of a list after removing and pushing it to another list. Deletes the list if the last element was popped.",
+      "since": "1.2.0"
+    },
+    {
+      "name": "RPUSH",
+      "group": "List commands",
+      "url": "https://redis.io/commands/rpush/",
+      "syntax": "RPUSH key element [element ...]",
+      "description": "Appends one or more elements to a list. Creates the key if it doesn't exist.",
+      "since": "1.0.0"
+    },
+    {
+      "name": "RPUSHX",
+      "group": "List commands",
+      "url": "https://redis.io/commands/rpushx/",
+      "syntax": "RPUSHX key element [element ...]",
+      "description": "Appends an element to a list only when the list exists.",
+      "since": "2.2.0"
+    },
+    {
+      "name": "SADD",
+      "group": "Set commands",
+      "url": "https://redis.io/commands/sadd/",
+      "syntax": "SADD key member [member ...]",
+      "description": "Adds one or more members to a set. Creates the key if it doesn't exist.",
+      "since": "1.0.0"
+    },
+    {
+      "name": "SCARD",
+      "group": "Set commands",
+      "url": "https://redis.io/commands/scard/",
+      "syntax": "SCARD key",
+      "description": "Returns the number of members in a set.",
+      "since": "1.0.0"
+    },
+    {
+      "name": "SDIFF",
+      "group": "Set commands",
+      "url": "https://redis.io/commands/sdiff/",
+      "syntax": "SDIFF key [key ...]",
+      "description": "Returns the difference of multiple sets.",
+      "since": "1.0.0"
+    },
+    {
+      "name": "SDIFFCARD",
+      "group": "Set commands",
+      "url": "https://redis.io/commands/sdiffcard/",
+      "syntax": "SDIFFCARD numkeys key [key ...] [LIMIT limit]",
+      "description": "Returns the number of members of the difference between the first set and all successive sets.",
+      "since": "8.10.0"
+    },
+    {
+      "name": "SDIFFSTORE",
+      "group": "Set commands",
+      "url": "https://redis.io/commands/sdiffstore/",
+      "syntax": "SDIFFSTORE destination key [key ...]",
+      "description": "Stores the difference of multiple sets in a key.",
+      "since": "1.0.0"
+    },
+    {
+      "name": "SINTER",
+      "group": "Set commands",
+      "url": "https://redis.io/commands/sinter/",
+      "syntax": "SINTER key [key ...]",
+      "description": "Returns the intersect of multiple sets.",
+      "since": "1.0.0"
+    },
+    {
+      "name": "SINTERCARD",
+      "group": "Set commands",
+      "url": "https://redis.io/commands/sintercard/",
+      "syntax": "SINTERCARD numkeys key [key ...] [LIMIT limit]",
+      "description": "Returns the number of members of the intersect of multiple sets.",
+      "since": "7.0.0"
+    },
+    {
+      "name": "SINTERSTORE",
+      "group": "Set commands",
+      "url": "https://redis.io/commands/sinterstore/",
+      "syntax": "SINTERSTORE destination key [key ...]",
+      "description": "Stores the intersect of multiple sets in a key.",
+      "since": "1.0.0"
+    },
+    {
+      "name": "SISMEMBER",
+      "group": "Set commands",
+      "url": "https://redis.io/commands/sismember/",
+      "syntax": "SISMEMBER key member",
+      "description": "Determines whether a member belongs to a set.",
+      "since": "1.0.0"
+    },
+    {
+      "name": "SMEMBERS",
+      "group": "Set commands",
+      "url": "https://redis.io/commands/smembers/",
+      "syntax": "SMEMBERS key",
+      "description": "Returns all members of a set.",
+      "since": "1.0.0"
+    },
+    {
+      "name": "SMISMEMBER",
+      "group": "Set commands",
+      "url": "https://redis.io/commands/smismember/",
+      "syntax": "SMISMEMBER key member [member ...]",
+      "description": "Determines whether multiple members belong to a set.",
+      "since": "6.2.0"
+    },
+    {
+      "name": "SMOVE",
+      "group": "Set commands",
+      "url": "https://redis.io/commands/smove/",
+      "syntax": "SMOVE source destination member",
+      "description": "Moves a member from one set to another.",
+      "since": "1.0.0"
+    },
+    {
+      "name": "SPOP",
+      "group": "Set commands",
+      "url": "https://redis.io/commands/spop/",
+      "syntax": "SPOP key [count]",
+      "description": "Returns one or more random members from a set after removing them. Deletes the set if the last member was popped.",
+      "since": "1.0.0"
+    },
+    {
+      "name": "SRANDMEMBER",
+      "group": "Set commands",
+      "url": "https://redis.io/commands/srandmember/",
+      "syntax": "SRANDMEMBER key [count]",
+      "description": "Get one or multiple random members from a set",
+      "since": "1.0.0"
+    },
+    {
+      "name": "SREM",
+      "group": "Set commands",
+      "url": "https://redis.io/commands/srem/",
+      "syntax": "SREM key member [member ...]",
+      "description": "Removes one or more members from a set. Deletes the set if the last member was removed.",
+      "since": "1.0.0"
+    },
+    {
+      "name": "SSCAN",
+      "group": "Set commands",
+      "url": "https://redis.io/commands/sscan/",
+      "syntax": "SSCAN key cursor [MATCH pattern] [COUNT count]",
+      "description": "Iterates over members of a set.",
+      "since": "2.8.0"
+    },
+    {
+      "name": "SUNION",
+      "group": "Set commands",
+      "url": "https://redis.io/commands/sunion/",
+      "syntax": "SUNION key [key ...]",
+      "description": "Returns the union of multiple sets.",
+      "since": "1.0.0"
+    },
+    {
+      "name": "SUNIONCARD",
+      "group": "Set commands",
+      "url": "https://redis.io/commands/sunioncard/",
+      "syntax": "SUNIONCARD numkeys key [key ...] [APPROX] [LIMIT limit]",
+      "description": "Returns the number of members of the union of multiple sets.",
+      "since": "8.10.0"
+    },
+    {
+      "name": "SUNIONSTORE",
+      "group": "Set commands",
+      "url": "https://redis.io/commands/sunionstore/",
+      "syntax": "SUNIONSTORE destination key [key ...]",
+      "description": "Stores the union of multiple sets in a key.",
+      "since": "1.0.0"
+    },
+    {
+      "name": "BZMPOP",
+      "group": "Sorted set commands",
+      "url": "https://redis.io/commands/bzmpop/",
+      "syntax": "BZMPOP timeout numkeys key [key ...] <MIN | MAX> [COUNT count]",
+      "description": "Removes and returns a member by score from one or more sorted sets. Blocks until a member is available otherwise. Deletes the sorted set if the last element was popped.",
+      "since": "7.0.0"
+    },
+    {
+      "name": "BZPOPMAX",
+      "group": "Sorted set commands",
+      "url": "https://redis.io/commands/bzpopmax/",
+      "syntax": "BZPOPMAX key [key ...] timeout",
+      "description": "Removes and returns the member with the highest score from one or more sorted sets. Blocks until a member available otherwise.  Deletes the sorted set if the last element was popped.",
+      "since": "5.0.0"
+    },
+    {
+      "name": "BZPOPMIN",
+      "group": "Sorted set commands",
+      "url": "https://redis.io/commands/bzpopmin/",
+      "syntax": "BZPOPMIN key [key ...] timeout",
+      "description": "Removes and returns the member with the lowest score from one or more sorted sets. Blocks until a member is available otherwise. Deletes the sorted set if the last element was popped.",
+      "since": "5.0.0"
+    },
+    {
+      "name": "ZADD",
+      "group": "Sorted set commands",
+      "url": "https://redis.io/commands/zadd/",
+      "syntax": "ZADD key [NX | XX] [GT | LT] [CH] [INCR] score member [score member\n  ...]",
+      "description": "Adds one or more members to a sorted set, or updates their scores. Creates the key if it doesn't exist.",
+      "since": "1.2.0"
+    },
+    {
+      "name": "ZCARD",
+      "group": "Sorted set commands",
+      "url": "https://redis.io/commands/zcard/",
+      "syntax": "ZCARD key",
+      "description": "Returns the number of members in a sorted set.",
+      "since": "1.2.0"
+    },
+    {
+      "name": "ZCOUNT",
+      "group": "Sorted set commands",
+      "url": "https://redis.io/commands/zcount/",
+      "syntax": "ZCOUNT key min max",
+      "description": "Returns the count of members in a sorted set that have scores within a range.",
+      "since": "2.0.0"
+    },
+    {
+      "name": "ZDIFF",
+      "group": "Sorted set commands",
+      "url": "https://redis.io/commands/zdiff/",
+      "syntax": "ZDIFF numkeys key [key ...] [WITHSCORES]",
+      "description": "Returns the difference between multiple sorted sets.",
+      "since": "6.2.0"
+    },
+    {
+      "name": "ZDIFFSTORE",
+      "group": "Sorted set commands",
+      "url": "https://redis.io/commands/zdiffstore/",
+      "syntax": "ZDIFFSTORE destination numkeys key [key ...]",
+      "description": "Stores the difference of multiple sorted sets in a key.",
+      "since": "6.2.0"
+    },
+    {
+      "name": "ZINCRBY",
+      "group": "Sorted set commands",
+      "url": "https://redis.io/commands/zincrby/",
+      "syntax": "ZINCRBY key increment member",
+      "description": "Increments the score of a member in a sorted set.",
+      "since": "1.2.0"
+    },
+    {
+      "name": "ZINTER",
+      "group": "Sorted set commands",
+      "url": "https://redis.io/commands/zinter/",
+      "syntax": "ZINTER numkeys key [key ...] [WEIGHTS weight [weight ...]]\n  [AGGREGATE <SUM | MIN | MAX | COUNT>] [WITHSCORES]",
+      "description": "Returns the intersect of multiple sorted sets.",
+      "since": "6.2.0"
+    },
+    {
+      "name": "ZINTERCARD",
+      "group": "Sorted set commands",
+      "url": "https://redis.io/commands/zintercard/",
+      "syntax": "ZINTERCARD numkeys key [key ...] [LIMIT limit]",
+      "description": "Returns the number of members of the intersect of multiple sorted sets.",
+      "since": "7.0.0"
+    },
+    {
+      "name": "ZINTERSTORE",
+      "group": "Sorted set commands",
+      "url": "https://redis.io/commands/zinterstore/",
+      "syntax": "ZINTERSTORE destination numkeys key [key ...] [WEIGHTS weight\n  [weight ...]] [AGGREGATE <SUM | MIN | MAX | COUNT>]",
+      "description": "Stores the intersect of multiple sorted sets in a key.",
+      "since": "2.0.0"
+    },
+    {
+      "name": "ZLEXCOUNT",
+      "group": "Sorted set commands",
+      "url": "https://redis.io/commands/zlexcount/",
+      "syntax": "ZLEXCOUNT key min max",
+      "description": "Returns the number of members in a sorted set within a lexicographical range.",
+      "since": "2.8.9"
+    },
+    {
+      "name": "ZMPOP",
+      "group": "Sorted set commands",
+      "url": "https://redis.io/commands/zmpop/",
+      "syntax": "ZMPOP numkeys key [key ...] <MIN | MAX> [COUNT count]",
+      "description": "Returns the highest- or lowest-scoring members from one or more sorted sets after removing them. Deletes the sorted set if the last member was popped.",
+      "since": "7.0.0"
+    },
+    {
+      "name": "ZMSCORE",
+      "group": "Sorted set commands",
+      "url": "https://redis.io/commands/zmscore/",
+      "syntax": "ZMSCORE key member [member ...]",
+      "description": "Returns the score of one or more members in a sorted set.",
+      "since": "6.2.0"
+    },
+    {
+      "name": "ZPOPMAX",
+      "group": "Sorted set commands",
+      "url": "https://redis.io/commands/zpopmax/",
+      "syntax": "ZPOPMAX key [count]",
+      "description": "Returns the highest-scoring members from a sorted set after removing them. Deletes the sorted set if the last member was popped.",
+      "since": "5.0.0"
+    },
+    {
+      "name": "ZPOPMIN",
+      "group": "Sorted set commands",
+      "url": "https://redis.io/commands/zpopmin/",
+      "syntax": "ZPOPMIN key [count]",
+      "description": "Returns the lowest-scoring members from a sorted set after removing them. Deletes the sorted set if the last member was popped.",
+      "since": "5.0.0"
+    },
+    {
+      "name": "ZRANDMEMBER",
+      "group": "Sorted set commands",
+      "url": "https://redis.io/commands/zrandmember/",
+      "syntax": "ZRANDMEMBER key [count [WITHSCORES]]",
+      "description": "Returns one or more random members from a sorted set.",
+      "since": "6.2.0"
+    },
+    {
+      "name": "ZRANGE",
+      "group": "Sorted set commands",
+      "url": "https://redis.io/commands/zrange/",
+      "syntax": "ZRANGE key start stop [BYSCORE | BYLEX] [REV] [LIMIT offset count]\n  [WITHSCORES]",
+      "description": "Returns members in a sorted set within a range of indexes.",
+      "since": "1.2.0"
+    },
+    {
+      "name": "ZRANGEBYLEX",
+      "group": "Sorted set commands",
+      "url": "https://redis.io/commands/zrangebylex/",
+      "syntax": "ZRANGEBYLEX key min max [LIMIT offset count]",
+      "description": "Returns members in a sorted set within a lexicographical range.",
+      "since": "2.8.9"
+    },
+    {
+      "name": "ZRANGEBYSCORE",
+      "group": "Sorted set commands",
+      "url": "https://redis.io/commands/zrangebyscore/",
+      "syntax": "ZRANGEBYSCORE key min max [WITHSCORES] [LIMIT offset count]",
+      "description": "Returns members in a sorted set within a range of scores.",
+      "since": "1.0.5"
+    },
+    {
+      "name": "ZRANGESTORE",
+      "group": "Sorted set commands",
+      "url": "https://redis.io/commands/zrangestore/",
+      "syntax": "ZRANGESTORE dst src min max [BYSCORE | BYLEX] [REV] [LIMIT offset\n  count]",
+      "description": "Stores a range of members from sorted set in a key.",
+      "since": "6.2.0"
+    },
+    {
+      "name": "ZRANK",
+      "group": "Sorted set commands",
+      "url": "https://redis.io/commands/zrank/",
+      "syntax": "ZRANK key member [WITHSCORE]",
+      "description": "Returns the index of a member in a sorted set ordered by ascending scores.",
+      "since": "2.0.0"
+    },
+    {
+      "name": "ZREM",
+      "group": "Sorted set commands",
+      "url": "https://redis.io/commands/zrem/",
+      "syntax": "ZREM key member [member ...]",
+      "description": "Removes one or more members from a sorted set. Deletes the sorted set if all members were removed.",
+      "since": "1.2.0"
+    },
+    {
+      "name": "ZREMRANGEBYLEX",
+      "group": "Sorted set commands",
+      "url": "https://redis.io/commands/zremrangebylex/",
+      "syntax": "ZREMRANGEBYLEX key min max",
+      "description": "Removes members in a sorted set within a lexicographical range. Deletes the sorted set if all members were removed.",
+      "since": "2.8.9"
+    },
+    {
+      "name": "ZREMRANGEBYRANK",
+      "group": "Sorted set commands",
+      "url": "https://redis.io/commands/zremrangebyrank/",
+      "syntax": "ZREMRANGEBYRANK key start stop",
+      "description": "Removes members in a sorted set within a range of indexes. Deletes the sorted set if all members were removed.",
+      "since": "2.0.0"
+    },
+    {
+      "name": "ZREMRANGEBYSCORE",
+      "group": "Sorted set commands",
+      "url": "https://redis.io/commands/zremrangebyscore/",
+      "syntax": "ZREMRANGEBYSCORE key min max",
+      "description": "Removes members in a sorted set within a range of scores. Deletes the sorted set if all members were removed.",
+      "since": "1.2.0"
+    },
+    {
+      "name": "ZREVRANGE",
+      "group": "Sorted set commands",
+      "url": "https://redis.io/commands/zrevrange/",
+      "syntax": "ZREVRANGE key start stop [WITHSCORES]",
+      "description": "Returns members in a sorted set within a range of indexes in reverse order.",
+      "since": "1.2.0"
+    },
+    {
+      "name": "ZREVRANGEBYLEX",
+      "group": "Sorted set commands",
+      "url": "https://redis.io/commands/zrevrangebylex/",
+      "syntax": "ZREVRANGEBYLEX key max min [LIMIT offset count]",
+      "description": "Returns members in a sorted set within a lexicographical range in reverse order.",
+      "since": "2.8.9"
+    },
+    {
+      "name": "ZREVRANGEBYSCORE",
+      "group": "Sorted set commands",
+      "url": "https://redis.io/commands/zrevrangebyscore/",
+      "syntax": "ZREVRANGEBYSCORE key max min [WITHSCORES] [LIMIT offset count]",
+      "description": "Returns members in a sorted set within a range of scores in reverse order.",
+      "since": "2.2.0"
+    },
+    {
+      "name": "ZREVRANK",
+      "group": "Sorted set commands",
+      "url": "https://redis.io/commands/zrevrank/",
+      "syntax": "ZREVRANK key member [WITHSCORE]",
+      "description": "Returns the index of a member in a sorted set ordered by descending scores.",
+      "since": "2.0.0"
+    },
+    {
+      "name": "ZSCAN",
+      "group": "Sorted set commands",
+      "url": "https://redis.io/commands/zscan/",
+      "syntax": "ZSCAN key cursor [MATCH pattern] [COUNT count]",
+      "description": "Iterates over members and scores of a sorted set.",
+      "since": "2.8.0"
+    },
+    {
+      "name": "ZSCORE",
+      "group": "Sorted set commands",
+      "url": "https://redis.io/commands/zscore/",
+      "syntax": "ZSCORE key member",
+      "description": "Returns the score of a member in a sorted set.",
+      "since": "1.2.0"
+    },
+    {
+      "name": "ZUNION",
+      "group": "Sorted set commands",
+      "url": "https://redis.io/commands/zunion/",
+      "syntax": "ZUNION numkeys key [key ...] [WEIGHTS weight [weight ...]]\n  [AGGREGATE <SUM | MIN | MAX | COUNT>] [WITHSCORES]",
+      "description": "Returns the union of multiple sorted sets.",
+      "since": "6.2.0"
+    },
+    {
+      "name": "ZUNIONSTORE",
+      "group": "Sorted set commands",
+      "url": "https://redis.io/commands/zunionstore/",
+      "syntax": "ZUNIONSTORE destination numkeys key [key ...] [WEIGHTS weight\n  [weight ...]] [AGGREGATE <SUM | MIN | MAX | COUNT>]",
+      "description": "Stores the union of multiple sorted sets in a key.",
+      "since": "2.0.0"
+    },
+    {
+      "name": "XACK",
+      "group": "Stream commands",
+      "url": "https://redis.io/commands/xack/",
+      "syntax": "XACK key group id [id ...]",
+      "description": "Returns the number of messages that were successfully acknowledged by the consumer group member of a stream.",
+      "since": "5.0.0"
+    },
+    {
+      "name": "XACKDEL",
+      "group": "Stream commands",
+      "url": "https://redis.io/commands/xackdel/",
+      "syntax": "XACKDEL key group [KEEPREF | DELREF | ACKED] IDS numids id [id ...]",
+      "description": "Acknowledges and conditionally deletes one or multiple entries for a stream consumer group.",
+      "since": "8.2.0"
+    },
+    {
+      "name": "XADD",
+      "group": "Stream commands",
+      "url": "https://redis.io/commands/xadd/",
+      "syntax": "XADD key [NOMKSTREAM] [KEEPREF | DELREF | ACKED]\n  [IDMPAUTO producer-id | IDMP producer-id idempotent-id]\n  [<MAXLEN | MINID> [= | ~] threshold [LIMIT count]] <* | id>\n  field value [field value ...]",
+      "description": "Appends a new message to a stream. Creates the key if it doesn't exist.",
+      "since": "5.0.0"
+    },
+    {
+      "name": "XAUTOCLAIM",
+      "group": "Stream commands",
+      "url": "https://redis.io/commands/xautoclaim/",
+      "syntax": "XAUTOCLAIM key group consumer min-idle-time start [COUNT count]\n  [JUSTID]",
+      "description": "Changes, or acquires, ownership of messages in a consumer group, as if the messages were delivered to as consumer group member.",
+      "since": "6.2.0"
+    },
+    {
+      "name": "XCFGSET",
+      "group": "Stream commands",
+      "url": "https://redis.io/commands/xcfgset/",
+      "syntax": "XCFGSET key [IDMP-DURATION idmp-duration]\n  [IDMP-MAXSIZE idmp-maxsize]",
+      "description": "Sets the IDMP configuration parameters for a stream.",
+      "since": "8.6.0"
+    },
+    {
+      "name": "XCLAIM",
+      "group": "Stream commands",
+      "url": "https://redis.io/commands/xclaim/",
+      "syntax": "XCLAIM key group consumer min-idle-time id [id ...] [IDLE ms]\n  [TIME unix-time-milliseconds] [RETRYCOUNT count] [FORCE] [JUSTID]\n  [LASTID lastid]",
+      "description": "Changes, or acquires, ownership of a message in a consumer group, as if the message was delivered a consumer group member.",
+      "since": "5.0.0"
+    },
+    {
+      "name": "XDEL",
+      "group": "Stream commands",
+      "url": "https://redis.io/commands/xdel/",
+      "syntax": "XDEL key id [id ...]",
+      "description": "Returns the number of messages after removing them from a stream.",
+      "since": "5.0.0"
+    },
+    {
+      "name": "XDELEX",
+      "group": "Stream commands",
+      "url": "https://redis.io/commands/xdelex/",
+      "syntax": "XDELEX key [KEEPREF | DELREF | ACKED] IDS numids id [id ...]",
+      "description": "Deletes one or multiple entries from the stream.",
+      "since": "8.2.0"
+    },
+    {
+      "name": "XGROUP CREATE",
+      "group": "Stream commands",
+      "url": "https://redis.io/commands/xgroup-create/",
+      "syntax": "XGROUP CREATE key group <id | $> [MKSTREAM]\n  [ENTRIESREAD entries-read]",
+      "description": "Creates a consumer group.",
+      "since": "5.0.0"
+    },
+    {
+      "name": "XGROUP CREATECONSUMER",
+      "group": "Stream commands",
+      "url": "https://redis.io/commands/xgroup-createconsumer/",
+      "syntax": "XGROUP CREATECONSUMER key group consumer",
+      "description": "Creates a consumer in a consumer group.",
+      "since": "6.2.0"
+    },
+    {
+      "name": "XGROUP DELCONSUMER",
+      "group": "Stream commands",
+      "url": "https://redis.io/commands/xgroup-delconsumer/",
+      "syntax": "XGROUP DELCONSUMER key group consumer",
+      "description": "Deletes a consumer from a consumer group.",
+      "since": "5.0.0"
+    },
+    {
+      "name": "XGROUP DESTROY",
+      "group": "Stream commands",
+      "url": "https://redis.io/commands/xgroup-destroy/",
+      "syntax": "XGROUP DESTROY key group",
+      "description": "Destroys a consumer group.",
+      "since": "5.0.0"
+    },
+    {
+      "name": "XGROUP SETID",
+      "group": "Stream commands",
+      "url": "https://redis.io/commands/xgroup-setid/",
+      "syntax": "XGROUP SETID key group <id | $> [ENTRIESREAD entries-read]",
+      "description": "Sets the last-delivered ID of a consumer group.",
+      "since": "5.0.0"
+    },
+    {
+      "name": "XIDMPRECORD",
+      "group": "Stream commands",
+      "url": "https://redis.io/commands/xidmprecord/",
+      "syntax": "XIDMPRECORD key pid iid stream-id",
+      "description": "An internal command for setting IDMP metadata on an existing stream message.",
+      "since": "8.8.0"
+    },
+    {
+      "name": "XINFO CONSUMERS",
+      "group": "Stream commands",
+      "url": "https://redis.io/commands/xinfo-consumers/",
+      "syntax": "XINFO CONSUMERS key group",
+      "description": "Returns a list of the consumers in a consumer group.",
+      "since": "5.0.0"
+    },
+    {
+      "name": "XINFO GROUPS",
+      "group": "Stream commands",
+      "url": "https://redis.io/commands/xinfo-groups/",
+      "syntax": "XINFO GROUPS key",
+      "description": "Returns a list of the consumer groups of a stream.",
+      "since": "5.0.0"
+    },
+    {
+      "name": "XINFO STREAM",
+      "group": "Stream commands",
+      "url": "https://redis.io/commands/xinfo-stream/",
+      "syntax": "XINFO STREAM key [FULL [COUNT count]]",
+      "description": "Returns information about a stream.",
+      "since": "5.0.0"
+    },
+    {
+      "name": "XLEN",
+      "group": "Stream commands",
+      "url": "https://redis.io/commands/xlen/",
+      "syntax": "XLEN key",
+      "description": "Return the number of messages in a stream.",
+      "since": "5.0.0"
+    },
+    {
+      "name": "XNACK",
+      "group": "Stream commands",
+      "url": "https://redis.io/commands/xnack/",
+      "syntax": "XNACK key group <SILENT | FAIL | FATAL> IDS numids id [id ...]\n  [RETRYCOUNT count] [FORCE]",
+      "description": "Releases pending messages back to the group's PEL without acknowledging them, making them available for re-delivery.",
+      "since": "8.8.0"
+    },
+    {
+      "name": "XPENDING",
+      "group": "Stream commands",
+      "url": "https://redis.io/commands/xpending/",
+      "syntax": "XPENDING key group [[IDLE min-idle-time] start end count [consumer]]",
+      "description": "Returns the information and entries from a stream consumer group's pending entries list.",
+      "since": "5.0.0"
+    },
+    {
+      "name": "XRANGE",
+      "group": "Stream commands",
+      "url": "https://redis.io/commands/xrange/",
+      "syntax": "XRANGE key start end [COUNT count]",
+      "description": "Returns the messages from a stream within a range of IDs.",
+      "since": "5.0.0"
+    },
+    {
+      "name": "XREAD",
+      "group": "Stream commands",
+      "url": "https://redis.io/commands/xread/",
+      "syntax": "XREAD [COUNT count] [MAXCOUNT maxcount] [MAXSIZE maxsize]\n  [BLOCK milliseconds] STREAMS key [key ...] id [id ...]",
+      "description": "Returns messages from multiple streams with IDs greater than the ones requested. Blocks until a message is available otherwise.",
+      "since": "5.0.0"
+    },
+    {
+      "name": "XREADGROUP",
+      "group": "Stream commands",
+      "url": "https://redis.io/commands/xreadgroup/",
+      "syntax": "XREADGROUP GROUP group consumer [COUNT count] [MAXCOUNT maxcount]\n  [MAXSIZE maxsize] [BLOCK milliseconds] [CLAIM min-idle-time]\n  [NOACK] STREAMS key [key ...] id [id ...]",
+      "description": "Returns new or historical messages from a stream for a consumer in a group. Blocks until a message is available otherwise.",
+      "since": "5.0.0"
+    },
+    {
+      "name": "XREVRANGE",
+      "group": "Stream commands",
+      "url": "https://redis.io/commands/xrevrange/",
+      "syntax": "XREVRANGE key end start [COUNT count]",
+      "description": "Returns the messages from a stream within a range of IDs in reverse order.",
+      "since": "5.0.0"
+    },
+    {
+      "name": "XSETID",
+      "group": "Stream commands",
+      "url": "https://redis.io/commands/xsetid/",
+      "syntax": "XSETID key last-id [ENTRIESADDED entries-added]\n  [MAXDELETEDID max-deleted-id]",
+      "description": "An internal command for replicating stream values.",
+      "since": "5.0.0"
+    },
+    {
+      "name": "XTRIM",
+      "group": "Stream commands",
+      "url": "https://redis.io/commands/xtrim/",
+      "syntax": "XTRIM key <MAXLEN | MINID> [= | ~] threshold [LIMIT count] [KEEPREF | DELREF | ACKED]",
+      "description": "Deletes messages from the beginning of a stream.",
+      "since": "5.0.0"
+    },
+    {
+      "name": "BITCOUNT",
+      "group": "Bitmap commands",
+      "url": "https://redis.io/commands/bitcount/",
+      "syntax": "BITCOUNT key [start end [BYTE | BIT]]",
+      "description": "Counts the number of set bits (population counting) in a string.",
+      "since": "2.6.0"
+    },
+    {
+      "name": "BITFIELD",
+      "group": "Bitmap commands",
+      "url": "https://redis.io/commands/bitfield/",
+      "syntax": "BITFIELD key [GET encoding offset | [OVERFLOW <WRAP | SAT | FAIL>]\n  <SET encoding offset value | INCRBY encoding offset increment>\n  [GET encoding offset | [OVERFLOW <WRAP | SAT | FAIL>]\n  <SET encoding offset value | INCRBY encoding offset increment>\n  ...]]",
+      "description": "Performs arbitrary bitfield integer operations on strings.",
+      "since": "3.2.0"
+    },
+    {
+      "name": "BITFIELD_RO",
+      "group": "Bitmap commands",
+      "url": "https://redis.io/commands/bitfield_ro/",
+      "syntax": "BITFIELD RO key [GET encoding offset [GET encoding offset ...]]",
+      "description": "Performs arbitrary read-only bitfield integer operations on strings.",
+      "since": "6.0.0"
+    },
+    {
+      "name": "BITOP",
+      "group": "Bitmap commands",
+      "url": "https://redis.io/commands/bitop/",
+      "syntax": "BITOP <AND | OR | XOR | NOT | DIFF | DIFF1 | ANDOR | ONE> destkey key [key ...]",
+      "description": "Performs bitwise operations on multiple strings, and stores the result.",
+      "since": "2.6.0"
+    },
+    {
+      "name": "BITPOS",
+      "group": "Bitmap commands",
+      "url": "https://redis.io/commands/bitpos/",
+      "syntax": "BITPOS key bit [start [end [BYTE | BIT]]]",
+      "description": "Finds the first set (1) or clear (0) bit in a string.",
+      "since": "2.8.7"
+    },
+    {
+      "name": "GETBIT",
+      "group": "Bitmap commands",
+      "url": "https://redis.io/commands/getbit/",
+      "syntax": "GETBIT key offset",
+      "description": "Returns a bit value by offset.",
+      "since": "2.2.0"
+    },
+    {
+      "name": "SETBIT",
+      "group": "Bitmap commands",
+      "url": "https://redis.io/commands/setbit/",
+      "syntax": "SETBIT key offset value",
+      "description": "Sets or clears the bit at offset of the string value. Creates the key if it doesn't exist.",
+      "since": "2.2.0"
+    },
+    {
+      "name": "ARCOUNT",
+      "group": "Array commands",
+      "url": "https://redis.io/commands/arcount/",
+      "syntax": "ARCOUNT key",
+      "description": "Returns the number of non-empty elements in an array.",
+      "since": "8.8.0"
+    },
+    {
+      "name": "ARDEL",
+      "group": "Array commands",
+      "url": "https://redis.io/commands/ardel/",
+      "syntax": "ARDEL key index [index ...]",
+      "description": "Deletes elements at the specified indices in an array.",
+      "since": "8.8.0"
+    },
+    {
+      "name": "ARDELRANGE",
+      "group": "Array commands",
+      "url": "https://redis.io/commands/ardelrange/",
+      "syntax": "ARDELRANGE key start end [start end ...]",
+      "description": "Deletes elements in one or more ranges.",
+      "since": "8.8.0"
+    },
+    {
+      "name": "ARGET",
+      "group": "Array commands",
+      "url": "https://redis.io/commands/arget/",
+      "syntax": "ARGET key index",
+      "description": "Gets the value at an index in an array.",
+      "since": "8.8.0"
+    },
+    {
+      "name": "ARGETRANGE",
+      "group": "Array commands",
+      "url": "https://redis.io/commands/argetrange/",
+      "syntax": "ARGETRANGE key start end",
+      "description": "Gets values in a range of indices.",
+      "since": "8.8.0"
+    },
+    {
+      "name": "ARGREP",
+      "group": "Array commands",
+      "url": "https://redis.io/commands/argrep/",
+      "syntax": "ARGREP key start end\n  <EXACT string | MATCH string | GLOB pattern | RE pattern [...]>\n  [AND | OR | LIMIT limit | WITHVALUES | NOCASE [...]]",
+      "description": "Searches array elements in a range using textual predicates.",
+      "since": "8.8.0"
+    },
+    {
+      "name": "ARINFO",
+      "group": "Array commands",
+      "url": "https://redis.io/commands/arinfo/",
+      "syntax": "ARINFO key [FULL]",
+      "description": "Returns metadata about an array.",
+      "since": "8.8.0"
+    },
+    {
+      "name": "ARINSERT",
+      "group": "Array commands",
+      "url": "https://redis.io/commands/arinsert/",
+      "syntax": "ARINSERT key value [value ...]",
+      "description": "Inserts one or more values at consecutive indices.",
+      "since": "8.8.0"
+    },
+    {
+      "name": "ARLASTITEMS",
+      "group": "Array commands",
+      "url": "https://redis.io/commands/arlastitems/",
+      "syntax": "ARLASTITEMS key count [REV]",
+      "description": "Returns the most recently inserted elements.",
+      "since": "8.8.0"
+    },
+    {
+      "name": "ARLEN",
+      "group": "Array commands",
+      "url": "https://redis.io/commands/arlen/",
+      "syntax": "ARLEN key",
+      "description": "Returns the length of an array (max index + 1).",
+      "since": "8.8.0"
+    },
+    {
+      "name": "ARMGET",
+      "group": "Array commands",
+      "url": "https://redis.io/commands/armget/",
+      "syntax": "ARMGET key index [index ...]",
+      "description": "Gets values at multiple indices in an array.",
+      "since": "8.8.0"
+    },
+    {
+      "name": "ARMSET",
+      "group": "Array commands",
+      "url": "https://redis.io/commands/armset/",
+      "syntax": "ARMSET key index value [index value ...]",
+      "description": "Sets multiple index-value pairs in an array.",
+      "since": "8.8.0"
+    },
+    {
+      "name": "ARNEXT",
+      "group": "Array commands",
+      "url": "https://redis.io/commands/arnext/",
+      "syntax": "ARNEXT key",
+      "description": "Returns the next index ARINSERT would use.",
+      "since": "8.8.0"
+    },
+    {
+      "name": "AROP",
+      "group": "Array commands",
+      "url": "https://redis.io/commands/arop/",
+      "syntax": "AROP key start end <SUM | MIN | MAX | AND | OR | XOR | MATCH value |\n  USED>",
+      "description": "Performs aggregate operations on array elements in a range.",
+      "since": "8.8.0"
+    },
+    {
+      "name": "ARRING",
+      "group": "Array commands",
+      "url": "https://redis.io/commands/arring/",
+      "syntax": "ARRING key size value [value ...]",
+      "description": "Inserts values into a ring buffer of specified size, wrapping and truncating as needed.",
+      "since": "8.8.0"
+    },
+    {
+      "name": "ARSCAN",
+      "group": "Array commands",
+      "url": "https://redis.io/commands/arscan/",
+      "syntax": "ARSCAN key start end [LIMIT limit]",
+      "description": "Iterates existing elements in a range, returning index-value pairs.",
+      "since": "8.8.0"
+    },
+    {
+      "name": "ARSEEK",
+      "group": "Array commands",
+      "url": "https://redis.io/commands/arseek/",
+      "syntax": "ARSEEK key index",
+      "description": "Sets the ARINSERT / ARRING cursor to a specific index.",
+      "since": "8.8.0"
+    },
+    {
+      "name": "ARSET",
+      "group": "Array commands",
+      "url": "https://redis.io/commands/arset/",
+      "syntax": "ARSET key index value [value ...]",
+      "description": "Sets one or more contiguous values starting at an index in an array.",
+      "since": "8.8.0"
+    },
+    {
+      "name": "PFADD",
+      "group": "HyperLogLog commands",
+      "url": "https://redis.io/commands/pfadd/",
+      "syntax": "PFADD key [element [element ...]]",
+      "description": "Adds elements to a HyperLogLog key. Creates the key if it doesn't exist.",
+      "since": "2.8.9"
+    },
+    {
+      "name": "PFCOUNT",
+      "group": "HyperLogLog commands",
+      "url": "https://redis.io/commands/pfcount/",
+      "syntax": "PFCOUNT key [key ...]",
+      "description": "Returns the approximated cardinality of the set(s) observed by the HyperLogLog key(s).",
+      "since": "2.8.9"
+    },
+    {
+      "name": "PFDEBUG",
+      "group": "HyperLogLog commands",
+      "url": "https://redis.io/commands/pfdebug/",
+      "syntax": "PFDEBUG subcommand key",
+      "description": "Internal commands for debugging HyperLogLog values.",
+      "since": "2.8.9"
+    },
+    {
+      "name": "PFMERGE",
+      "group": "HyperLogLog commands",
+      "url": "https://redis.io/commands/pfmerge/",
+      "syntax": "PFMERGE destkey [sourcekey [sourcekey ...]]",
+      "description": "Merges one or more HyperLogLog values into a single key.",
+      "since": "2.8.9"
+    },
+    {
+      "name": "PFSELFTEST",
+      "group": "HyperLogLog commands",
+      "url": "https://redis.io/commands/pfselftest/",
+      "syntax": "PFSELFTEST",
+      "description": "An internal command for testing HyperLogLog values.",
+      "since": "2.8.9"
+    },
+    {
+      "name": "GEOADD",
+      "group": "Geospatial commands",
+      "url": "https://redis.io/commands/geoadd/",
+      "syntax": "GEOADD key [NX | XX] [CH] longitude latitude member [longitude\n  latitude member ...]",
+      "description": "Adds one or more members to a geospatial index. The key is created if it doesn't exist.",
+      "since": "3.2.0"
+    },
+    {
+      "name": "GEODIST",
+      "group": "Geospatial commands",
+      "url": "https://redis.io/commands/geodist/",
+      "syntax": "GEODIST key member1 member2 [M | KM | FT | MI]",
+      "description": "Returns the distance between two members of a geospatial index.",
+      "since": "3.2.0"
+    },
+    {
+      "name": "GEOHASH",
+      "group": "Geospatial commands",
+      "url": "https://redis.io/commands/geohash/",
+      "syntax": "GEOHASH key [member [member ...]]",
+      "description": "Returns members from a geospatial index as geohash strings.",
+      "since": "3.2.0"
+    },
+    {
+      "name": "GEOPOS",
+      "group": "Geospatial commands",
+      "url": "https://redis.io/commands/geopos/",
+      "syntax": "GEOPOS key [member [member ...]]",
+      "description": "Returns the longitude and latitude of members from a geospatial index.",
+      "since": "3.2.0"
+    },
+    {
+      "name": "GEORADIUS",
+      "group": "Geospatial commands",
+      "url": "https://redis.io/commands/georadius/",
+      "syntax": "GEORADIUS key longitude latitude radius <M | KM | FT | MI>\n  [WITHCOORD] [WITHDIST] [WITHHASH] [COUNT count [ANY]] [ASC | DESC]\n  [STORE key | STOREDIST key]",
+      "description": "Queries a geospatial index for members within a distance from a coordinate, optionally stores the result.",
+      "since": "3.2.0"
+    },
+    {
+      "name": "GEORADIUSBYMEMBER",
+      "group": "Geospatial commands",
+      "url": "https://redis.io/commands/georadiusbymember/",
+      "syntax": "GEORADIUSBYMEMBER key member radius <M | KM | FT | MI> [WITHCOORD]\n  [WITHDIST] [WITHHASH] [COUNT count [ANY]] [ASC | DESC] [STORE key\n  | STOREDIST key]",
+      "description": "Queries a geospatial index for members within a distance from a member, optionally stores the result.",
+      "since": "3.2.0"
+    },
+    {
+      "name": "GEORADIUSBYMEMBER_RO",
+      "group": "Geospatial commands",
+      "url": "https://redis.io/commands/georadiusbymember_ro/",
+      "syntax": "GEORADIUSBYMEMBER RO key member radius <M | KM | FT | MI>\n  [WITHCOORD] [WITHDIST] [WITHHASH] [COUNT count [ANY]] [ASC | DESC]",
+      "description": "Returns members from a geospatial index that are within a distance from a member.",
+      "since": "3.2.10"
+    },
+    {
+      "name": "GEORADIUS_RO",
+      "group": "Geospatial commands",
+      "url": "https://redis.io/commands/georadius_ro/",
+      "syntax": "GEORADIUS RO key longitude latitude radius <M | KM | FT | MI>\n  [WITHCOORD] [WITHDIST] [WITHHASH] [COUNT count [ANY]] [ASC | DESC]",
+      "description": "Returns members from a geospatial index that are within a distance from a coordinate.",
+      "since": "3.2.10"
+    },
+    {
+      "name": "GEOSEARCH",
+      "group": "Geospatial commands",
+      "url": "https://redis.io/commands/geosearch/",
+      "syntax": "GEOSEARCH key <FROMMEMBER member | FROMLONLAT longitude latitude>\n  <BYRADIUS radius <M | KM | FT | MI> | BYBOX width height <M | KM |\n  FT | MI>> [ASC | DESC] [COUNT count [ANY]] [WITHCOORD] [WITHDIST]\n  [WITHHASH]",
+      "description": "Queries a geospatial index for members inside an area of a box or a circle.",
+      "since": "6.2.0"
+    },
+    {
+      "name": "GEOSEARCHSTORE",
+      "group": "Geospatial commands",
+      "url": "https://redis.io/commands/geosearchstore/",
+      "syntax": "GEOSEARCHSTORE destination source <FROMMEMBER member |\n  FROMLONLAT longitude latitude> <BYRADIUS radius <M | KM | FT | MI>\n  | BYBOX width height <M | KM | FT | MI>> [ASC | DESC] [COUNT count\n  [ANY]] [STOREDIST]",
+      "description": "Queries a geospatial index for members inside an area of a box or a circle, optionally stores the result.",
+      "since": "6.2.0"
+    },
+    {
+      "name": "JSON.ARRAPPEND",
+      "group": "JSON commands",
+      "url": "https://redis.io/commands/json.arrappend/",
+      "syntax": "JSON.ARRAPPEND key path value [value ...]",
+      "description": "Append one or more json values into the array at path after the last element in it.",
+      "since": "1.0.0"
+    },
+    {
+      "name": "JSON.ARRINDEX",
+      "group": "JSON commands",
+      "url": "https://redis.io/commands/json.arrindex/",
+      "syntax": "JSON.ARRINDEX key path value [start [stop]]",
+      "description": "Returns the index of the first occurrence of a JSON scalar value in the array at path",
+      "since": "1.0.0"
+    },
+    {
+      "name": "JSON.ARRINSERT",
+      "group": "JSON commands",
+      "url": "https://redis.io/commands/json.arrinsert/",
+      "syntax": "JSON.ARRINSERT key path index value [value ...]",
+      "description": "Inserts the JSON scalar(s) value at the specified index in the array at path",
+      "since": "1.0.0"
+    },
+    {
+      "name": "JSON.ARRLEN",
+      "group": "JSON commands",
+      "url": "https://redis.io/commands/json.arrlen/",
+      "syntax": "JSON.ARRLEN key [path]",
+      "description": "Returns the length of the array at path",
+      "since": "1.0.0"
+    },
+    {
+      "name": "JSON.ARRPOP",
+      "group": "JSON commands",
+      "url": "https://redis.io/commands/json.arrpop/",
+      "syntax": "JSON.ARRPOP key [path [index]]",
+      "description": "Removes and returns the element at the specified index in the array at path",
+      "since": "1.0.0"
+    },
+    {
+      "name": "JSON.ARRTRIM",
+      "group": "JSON commands",
+      "url": "https://redis.io/commands/json.arrtrim/",
+      "syntax": "JSON.ARRTRIM key path start stop",
+      "description": "Trims the array at path to contain only the specified inclusive range of indices from start to stop",
+      "since": "1.0.0"
+    },
+    {
+      "name": "JSON.CLEAR",
+      "group": "JSON commands",
+      "url": "https://redis.io/commands/json.clear/",
+      "syntax": "JSON.CLEAR key [path]",
+      "description": "Clears all values from an array or an object and sets numeric values to `0`",
+      "since": "2.0.0"
+    },
+    {
+      "name": "JSON.DEBUG",
+      "group": "JSON commands",
+      "url": "https://redis.io/commands/json.debug/",
+      "syntax": "JSON.DEBUG",
+      "description": "Debugging container command",
+      "since": "1.0.0"
+    },
+    {
+      "name": "JSON.DEBUG MEMORY",
+      "group": "JSON commands",
+      "url": "https://redis.io/commands/json.debug-memory/",
+      "syntax": "JSON.DEBUG MEMORY key [path]",
+      "description": "Reports the size in bytes of a key",
+      "since": "1.0.0"
+    },
+    {
+      "name": "JSON.DEL",
+      "group": "JSON commands",
+      "url": "https://redis.io/commands/json.del/",
+      "syntax": "JSON.DEL key [path]",
+      "description": "Deletes a value",
+      "since": "1.0.0"
+    },
+    {
+      "name": "JSON.FORGET",
+      "group": "JSON commands",
+      "url": "https://redis.io/commands/json.forget/",
+      "syntax": "JSON.FORGET key [path]",
+      "description": "Deletes a value",
+      "since": "1.0.0"
+    },
+    {
+      "name": "JSON.GET",
+      "group": "JSON commands",
+      "url": "https://redis.io/commands/json.get/",
+      "syntax": "JSON.GET key [INDENT indent] [NEWLINE newline] [SPACE space] [path\n  [path ...]]",
+      "description": "Gets the value at one or more paths in JSON serialized form",
+      "since": "1.0.0"
+    },
+    {
+      "name": "JSON.MERGE",
+      "group": "JSON commands",
+      "url": "https://redis.io/commands/json.merge/",
+      "syntax": "JSON.MERGE key path value",
+      "description": "Merges a given JSON value into matching paths. Consequently, JSON values at matching paths are updated, deleted, or expanded with new children",
+      "since": "2.6.0"
+    },
+    {
+      "name": "JSON.MGET",
+      "group": "JSON commands",
+      "url": "https://redis.io/commands/json.mget/",
+      "syntax": "JSON.MGET key [key ...] path",
+      "description": "Returns the values at a path from one or more keys",
+      "since": "1.0.0"
+    },
+    {
+      "name": "JSON.MSET",
+      "group": "JSON commands",
+      "url": "https://redis.io/commands/json.mset/",
+      "syntax": "JSON.MSET key path value [key path value ...]",
+      "description": "Sets or updates the JSON value of one or more keys",
+      "since": "2.6.0"
+    },
+    {
+      "name": "JSON.NUMINCRBY",
+      "group": "JSON commands",
+      "url": "https://redis.io/commands/json.numincrby/",
+      "syntax": "JSON.NUMINCRBY key path value",
+      "description": "Increments the numeric value at path by a value",
+      "since": "1.0.0"
+    },
+    {
+      "name": "JSON.NUMMULTBY",
+      "group": "JSON commands",
+      "url": "https://redis.io/commands/json.nummultby/",
+      "syntax": "JSON.NUMMULTBY key path value",
+      "description": "Multiplies the numeric value at path by a value",
+      "since": "1.0.0"
+    },
+    {
+      "name": "JSON.OBJKEYS",
+      "group": "JSON commands",
+      "url": "https://redis.io/commands/json.objkeys/",
+      "syntax": "JSON.OBJKEYS key [path]",
+      "description": "Returns the key names of JSON objects at the paths matching a given path expression",
+      "since": "1.0.0"
+    },
+    {
+      "name": "JSON.OBJLEN",
+      "group": "JSON commands",
+      "url": "https://redis.io/commands/json.objlen/",
+      "syntax": "JSON.OBJLEN key [path]",
+      "description": "Returns the number of keys in JSON objects at the paths matching a given path expression",
+      "since": "1.0.0"
+    },
+    {
+      "name": "JSON.RESP",
+      "group": "JSON commands",
+      "url": "https://redis.io/commands/json.resp/",
+      "syntax": "JSON.RESP key [path]",
+      "description": "Returns the JSON value at path in Redis Serialization Protocol (RESP)",
+      "since": "1.0.0"
+    },
+    {
+      "name": "JSON.SET",
+      "group": "JSON commands",
+      "url": "https://redis.io/commands/json.set/",
+      "syntax": "JSON.SET key path value [NX | XX] [FPHA <FP16 | BF16 | FP32 | FP64>]",
+      "description": "Sets or updates the JSON value at a path",
+      "since": "1.0.0"
+    },
+    {
+      "name": "JSON.STRAPPEND",
+      "group": "JSON commands",
+      "url": "https://redis.io/commands/json.strappend/",
+      "syntax": "JSON.STRAPPEND key [path] value",
+      "description": "Appends a string to JSON strings at the paths matching a given path expression",
+      "since": "1.0.0"
+    },
+    {
+      "name": "JSON.STRLEN",
+      "group": "JSON commands",
+      "url": "https://redis.io/commands/json.strlen/",
+      "syntax": "JSON.STRLEN key [path]",
+      "description": "Returns the length of JSON strings at the paths matching a given path expression",
+      "since": "1.0.0"
+    },
+    {
+      "name": "JSON.TOGGLE",
+      "group": "JSON commands",
+      "url": "https://redis.io/commands/json.toggle/",
+      "syntax": "JSON.TOGGLE key path",
+      "description": "Toggles a boolean value",
+      "since": "2.0.0"
+    },
+    {
+      "name": "JSON.TYPE",
+      "group": "JSON commands",
+      "url": "https://redis.io/commands/json.type/",
+      "syntax": "JSON.TYPE key [path]",
+      "description": "Returns the type of the JSON value at path",
+      "since": "1.0.0"
+    },
+    {
+      "name": "FT.AGGREGATE",
+      "group": "Search commands",
+      "url": "https://redis.io/commands/ft.aggregate/",
+      "syntax": "",
+      "description": "Run a search query on an index and perform aggregate transformations on the results",
+      "since": "1.1.0"
+    },
+    {
+      "name": "FT.ALIASADD",
+      "group": "Search commands",
+      "url": "https://redis.io/commands/ft.aliasadd/",
+      "syntax": "FT.ALIASADD alias index",
+      "description": "Adds an alias to the index",
+      "since": "1.0.0"
+    },
+    {
+      "name": "FT.ALIASDEL",
+      "group": "Search commands",
+      "url": "https://redis.io/commands/ft.aliasdel/",
+      "syntax": "FT.ALIASDEL alias",
+      "description": "Deletes an alias from the index",
+      "since": "1.0.0"
+    },
+    {
+      "name": "FT.ALIASLIST",
+      "group": "Search commands",
+      "url": "https://redis.io/commands/ft.aliaslist/",
+      "syntax": "FT.ALIASLIST index",
+      "description": "Lists all aliases for the index",
+      "since": "8.10.0"
+    },
+    {
+      "name": "FT.ALIASUPDATE",
+      "group": "Search commands",
+      "url": "https://redis.io/commands/ft.aliasupdate/",
+      "syntax": "FT.ALIASUPDATE alias index",
+      "description": "Adds or updates an alias to the index",
+      "since": "1.0.0"
+    },
+    {
+      "name": "FT.ALTER",
+      "group": "Search commands",
+      "url": "https://redis.io/commands/ft.alter/",
+      "syntax": "FT.ALTER index [SKIPINITIALSCAN] SCHEMA ADD field options",
+      "description": "Adds a new field to the index",
+      "since": "1.0.0"
+    },
+    {
+      "name": "FT.CONFIG GET",
+      "group": "Search commands",
+      "url": "https://redis.io/commands/ft.config-get/",
+      "syntax": "FT.CONFIG GET option",
+      "description": "Retrieves runtime configuration options",
+      "since": "1.0.0"
+    },
+    {
+      "name": "FT.CONFIG SET",
+      "group": "Search commands",
+      "url": "https://redis.io/commands/ft.config-set/",
+      "syntax": "FT.CONFIG SET option value",
+      "description": "Sets runtime configuration options",
+      "since": "1.0.0"
+    },
+    {
+      "name": "FT.CREATE",
+      "group": "Search commands",
+      "url": "https://redis.io/commands/ft.create/",
+      "syntax": "FT.CREATE index [ON <HASH | JSON>] [PREFIX count prefix [prefix\n  ...]] [FILTER filter] [LANGUAGE default lang]\n  [LANGUAGE FIELD lang attribute] [SCORE default score]\n  [SCORE FIELD score attribute] [PAYLOAD FIELD payload attribute]\n  [MAXTEXTFIELDS] [TEMPORARY seconds] [NOOFFSETS] [NOHL] [NOFIELDS]\n  [NOFREQS] [STOPWORDS count [stopword [stopword ...]]]\n  [SKIPINITIALSCAN] [INDEXALL <ENABLE | DISABLE>] SCHEMA field name [AS alias] <TEXT | TAG |\n  NUMERIC | GEO | VECTOR> [WITHSUFFIXTRIE] [INDEXEMPTY]\n  [INDEXMISSING] [SORTABLE [UNF]] [NOINDEX] [field name [AS alias]\n  <TEXT | TAG | NUMERIC | GEO | VECTOR> [WITHSUFFIXTRIE]\n  [INDEXEMPTY] [INDEXMISSING] [SORTABLE [UNF]] [NOINDEX] ...]",
+      "description": "Creates an index with the given spec",
+      "since": "1.0.0"
+    },
+    {
+      "name": "FT.CURSOR DEL",
+      "group": "Search commands",
+      "url": "https://redis.io/commands/ft.cursor-del/",
+      "syntax": "FT.CURSOR DEL index cursor id",
+      "description": "Deletes a cursor",
+      "since": "1.1.0"
+    },
+    {
+      "name": "FT.CURSOR READ",
+      "group": "Search commands",
+      "url": "https://redis.io/commands/ft.cursor-read/",
+      "syntax": "FT.CURSOR READ index cursor id [COUNT read size]",
+      "description": "Reads from a cursor",
+      "since": "1.1.0"
+    },
+    {
+      "name": "FT.DICTADD",
+      "group": "Search commands",
+      "url": "https://redis.io/commands/ft.dictadd/",
+      "syntax": "FT.DICTADD dict term [term ...]",
+      "description": "Adds terms to a dictionary",
+      "since": "1.4.0"
+    },
+    {
+      "name": "FT.DICTDEL",
+      "group": "Search commands",
+      "url": "https://redis.io/commands/ft.dictdel/",
+      "syntax": "FT.DICTDEL dict term [term ...]",
+      "description": "Deletes terms from a dictionary",
+      "since": "1.4.0"
+    },
+    {
+      "name": "FT.DICTDUMP",
+      "group": "Search commands",
+      "url": "https://redis.io/commands/ft.dictdump/",
+      "syntax": "FT.DICTDUMP dict",
+      "description": "Dumps all terms in the given dictionary",
+      "since": "1.4.0"
+    },
+    {
+      "name": "FT.DROPINDEX",
+      "group": "Search commands",
+      "url": "https://redis.io/commands/ft.dropindex/",
+      "syntax": "FT.DROPINDEX index [DD]",
+      "description": "Deletes the index",
+      "since": "2.0.0"
+    },
+    {
+      "name": "FT.EXPLAIN",
+      "group": "Search commands",
+      "url": "https://redis.io/commands/ft.explain/",
+      "syntax": "FT.EXPLAIN index query [DIALECT dialect]",
+      "description": "Returns the execution plan for a complex query",
+      "since": "1.0.0"
+    },
+    {
+      "name": "FT.EXPLAINCLI",
+      "group": "Search commands",
+      "url": "https://redis.io/commands/ft.explaincli/",
+      "syntax": "FT.EXPLAINCLI index query [DIALECT dialect]",
+      "description": "Returns the execution plan for a complex query",
+      "since": "1.0.0"
+    },
+    {
+      "name": "FT.HYBRID",
+      "group": "Search commands",
+      "url": "https://redis.io/commands/ft.hybrid/",
+      "syntax": "FT.HYBRID index\n  SEARCH query\n    [SCORER scorer]\n    [YIELD SCORE AS name]\n  VSIM vector field $vector param\n    [KNN count K k [EF RUNTIME ef runtime]] [SHARD K RATIO shard k ratio]]\n    [RANGE count RADIUS radius [EPSILON epsilon]]\n    [YIELD SCORE AS name]\n    [FILTER] count filter-expression [POLICY [ADHOC/BATCHES] BATCH SIZE batch-size-value]\n  [COMBINE RRF count [CONSTANT constant] [WINDOW window] [YIELD SCORE AS name]]\n  [COMBINE LINEAR count [[ALPHA alpha] [BETA beta]] [WINDOW window] [YIELD SCORE AS name]]\n  [LIMIT offset num]\n  [SORTBY count sortby [ASC | DESC]]\n  [NOSORT]\n  [LOAD count field [field ...]]\n  [LOAD *]\n  [GROUPBY nargs property [property ...]\n  [GROUPBY nargs property [property ...]\n    [REDUCE function nargs arg [arg ...] [AS name]\n    [REDUCE function nargs arg [arg ...] [AS name] ...]] ...]]\n  [APPLY expression AS name [APPLY expression AS name ...]]\n  [FILTER filter]\n  PARAMS nargs vector param vector blob [name value ...]\n  [TIMEOUT timeout]",
+      "description": "Performs hybrid search combining text search and vector similarity search",
+      "since": "8.4.0"
+    },
+    {
+      "name": "FT.INFO",
+      "group": "Search commands",
+      "url": "https://redis.io/commands/ft.info/",
+      "syntax": "FT.INFO index",
+      "description": "Returns information and statistics on the index",
+      "since": "1.0.0"
+    },
+    {
+      "name": "FT.PROFILE",
+      "group": "Search commands",
+      "url": "https://redis.io/commands/ft.profile/",
+      "syntax": "FT.PROFILE index <SEARCH | HYBRID | AGGREGATE> [LIMITED] QUERY query",
+      "description": "Performs a `FT.SEARCH`, `FT.HYBRID`, or `FT.AGGREGATE` command and collects performance information",
+      "since": "2.2.0"
+    },
+    {
+      "name": "FT.SEARCH",
+      "group": "Search commands",
+      "url": "https://redis.io/commands/ft.search/",
+      "syntax": "FT.SEARCH index query [NOCONTENT] [VERBATIM] [NOSTOPWORDS]\n  [WITHSCORES] [WITHPAYLOADS] [WITHSORTKEYS] [FILTER numeric field\n  min max [FILTER numeric field min max ...]] [GEOFILTER geo field\n  lon lat radius <m | km | mi | ft> [GEOFILTER geo field lon lat\n  radius <m | km | mi | ft> ...]] [INKEYS count key [key ...]]\n  [INFIELDS count field [field ...]] [RETURN count identifier\n  [AS property] [identifier [AS property] ...]] [SUMMARIZE\n  [FIELDS count field [field ...]] [FRAGS num] [LEN fragsize]\n  [SEPARATOR separator]] [HIGHLIGHT [FIELDS count field [field ...]]\n  [TAGS open close]] [SLOP slop] [TIMEOUT timeout] [INORDER]\n  [LANGUAGE language] [EXPANDER expander] [SCORER scorer]\n  [EXPLAINSCORE] [PAYLOAD payload] [SORTBY sortby [ASC | DESC]]\n  [LIMIT offset num] [PARAMS nargs name value [name value ...]]\n  [DIALECT dialect]",
+      "description": "Searches the index with a textual query, returning either documents or just ids",
+      "since": "1.0.0"
+    },
+    {
+      "name": "FT.SPELLCHECK",
+      "group": "Search commands",
+      "url": "https://redis.io/commands/ft.spellcheck/",
+      "syntax": "FT.SPELLCHECK index query [DISTANCE distance] [TERMS <INCLUDE |\n  EXCLUDE> dictionary [terms [terms ...]]] [DIALECT dialect]",
+      "description": "Performs spelling correction on a query, returning suggestions for misspelled terms",
+      "since": "1.4.0"
+    },
+    {
+      "name": "FT.SYNDUMP",
+      "group": "Search commands",
+      "url": "https://redis.io/commands/ft.syndump/",
+      "syntax": "FT.SYNDUMP index",
+      "description": "Dumps the contents of a synonym group",
+      "since": "1.2.0"
+    },
+    {
+      "name": "FT.SYNUPDATE",
+      "group": "Search commands",
+      "url": "https://redis.io/commands/ft.synupdate/",
+      "syntax": "FT.SYNUPDATE index synonym group id [SKIPINITIALSCAN] term [term\n  ...]",
+      "description": "Creates or updates a synonym group with additional terms",
+      "since": "1.2.0"
+    },
+    {
+      "name": "FT.TAGVALS",
+      "group": "Search commands",
+      "url": "https://redis.io/commands/ft.tagvals/",
+      "syntax": "FT.TAGVALS index field name",
+      "description": "Returns the distinct tags indexed in a Tag field",
+      "since": "1.0.0"
+    },
+    {
+      "name": "FT._LIST",
+      "group": "Search commands",
+      "url": "https://redis.io/commands/ft._list/",
+      "syntax": "FT. LIST",
+      "description": "Returns a list of all existing indexes",
+      "since": "2.0.0"
+    },
+    {
+      "name": "TS.ADD",
+      "group": "Time series commands",
+      "url": "https://redis.io/commands/ts.add/",
+      "syntax": "TS.ADD key timestamp value [RETENTION retentionPeriod]\n  [ENCODING <UNCOMPRESSED | COMPRESSED>] [CHUNK SIZE size]\n  [ON DUPLICATE <BLOCK | FIRST | LAST | MIN | MAX | SUM>]\n  [LABELS label value [label value ...]]",
+      "description": "Append a sample to a time series",
+      "since": "1.0.0"
+    },
+    {
+      "name": "TS.ALTER",
+      "group": "Time series commands",
+      "url": "https://redis.io/commands/ts.alter/",
+      "syntax": "TS.ALTER key [RETENTION retentionPeriod] [CHUNK SIZE size]\n  [DUPLICATE POLICY <BLOCK | FIRST | LAST | MIN | MAX | SUM>] [LABELS label value\n  [label value ...]]",
+      "description": "Update the retention, chunk size, duplicate policy, and labels of an existing time series",
+      "since": "1.0.0"
+    },
+    {
+      "name": "TS.CREATE",
+      "group": "Time series commands",
+      "url": "https://redis.io/commands/ts.create/",
+      "syntax": "TS.CREATE key [RETENTION retentionPeriod] [ENCODING <UNCOMPRESSED |\n  COMPRESSED>] [CHUNK SIZE size] [DUPLICATE POLICY <BLOCK | FIRST |\n  LAST | MIN | MAX | SUM>] [LABELS label value [label value ...]]",
+      "description": "Create a new time series",
+      "since": "1.0.0"
+    },
+    {
+      "name": "TS.CREATERULE",
+      "group": "Time series commands",
+      "url": "https://redis.io/commands/ts.createrule/",
+      "syntax": "TS.CREATERULE sourceKey destKey AGGREGATION <AVG | FIRST | LAST |\n  MIN | MAX | SUM | RANGE | COUNT | STD.P | STD.S | VAR.P | VAR.S |\n  TWA> bucketDuration [alignTimestamp]",
+      "description": "Create a compaction rule",
+      "since": "1.0.0"
+    },
+    {
+      "name": "TS.DECRBY",
+      "group": "Time series commands",
+      "url": "https://redis.io/commands/ts.decrby/",
+      "syntax": "TS.DECRBY key value [TIMESTAMP timestamp]\n  [RETENTION retentionPeriod] [UNCOMPRESSED] [CHUNK SIZE size]\n  [LABELS label value [label value ...]]",
+      "description": "Decrease the value of the sample with the maximum existing timestamp, or create a new sample with a value equal to the value of the sample with the maximum existing timestamp with a given decrement",
+      "since": "1.0.0"
+    },
+    {
+      "name": "TS.DEL",
+      "group": "Time series commands",
+      "url": "https://redis.io/commands/ts.del/",
+      "syntax": "TS.DEL key from timestamp to timestamp",
+      "description": "Delete all samples between two timestamps for a given time series",
+      "since": "1.6.0"
+    },
+    {
+      "name": "TS.DELETERULE",
+      "group": "Time series commands",
+      "url": "https://redis.io/commands/ts.deleterule/",
+      "syntax": "TS.DELETERULE sourceKey destKey",
+      "description": "Delete a compaction rule",
+      "since": "1.0.0"
+    },
+    {
+      "name": "TS.GET",
+      "group": "Time series commands",
+      "url": "https://redis.io/commands/ts.get/",
+      "syntax": "TS.GET key [LATEST]",
+      "description": "Get the sample with the highest timestamp from a given time series",
+      "since": "1.0.0"
+    },
+    {
+      "name": "TS.INCRBY",
+      "group": "Time series commands",
+      "url": "https://redis.io/commands/ts.incrby/",
+      "syntax": "TS.INCRBY key value [TIMESTAMP timestamp]\n  [RETENTION retentionPeriod] [UNCOMPRESSED] [CHUNK SIZE size]\n  [LABELS label value [label value ...]]",
+      "description": "Increase the value of the sample with the maximum existing timestamp, or create a new sample with a value equal to the value of the sample with the maximum existing timestamp with a given increment",
+      "since": "1.0.0"
+    },
+    {
+      "name": "TS.INFO",
+      "group": "Time series commands",
+      "url": "https://redis.io/commands/ts.info/",
+      "syntax": "TS.INFO key [DEBUG]",
+      "description": "Returns information and statistics for a time series",
+      "since": "1.0.0"
+    },
+    {
+      "name": "TS.MADD",
+      "group": "Time series commands",
+      "url": "https://redis.io/commands/ts.madd/",
+      "syntax": "TS.MADD key timestamp value [key timestamp value ...]",
+      "description": "Append new samples to one or more time series",
+      "since": "1.0.0"
+    },
+    {
+      "name": "TS.MGET",
+      "group": "Time series commands",
+      "url": "https://redis.io/commands/ts.mget/",
+      "syntax": "TS.MGET [LATEST] [WITHLABELS | SELECTED LABELS label1 [label1 ...]]\n  FILTER <l=v | l!=v | l= | l!= | l=(v1,v2,...) | l!=(v1,v2,...)\n  [l=v | l!=v | l= | l!= | l=(v1,v2,...) | l!=(v1,v2,...) ...]>",
+      "description": "Get the sample with the highest timestamp from each time series matching a specific filter",
+      "since": "1.0.0"
+    },
+    {
+      "name": "TS.MRANGE",
+      "group": "Time series commands",
+      "url": "https://redis.io/commands/ts.mrange/",
+      "syntax": "TS.MRANGE fromTimestamp toTimestamp [LATEST] [FILTER BY TS Timestamp\n  [Timestamp ...]] [FILTER BY VALUE min max] [WITHLABELS |\n  SELECTED LABELS label1 [label1 ...]] [COUNT count] [[ALIGN value]\n  AGGREGATION aggregators bucketDuration [BUCKETTIMESTAMP]\n  [EMPTY]] FILTER <l=v | l!=v | l= | l!= | l=(v1,v2,...) |\n  l!=(v1,v2,...) [l=v | l!=v | l= | l!= | l=(v1,v2,...) |\n  l!=(v1,v2,...) ...]> [GROUPBY label REDUCE reducer] [EXCLUDEEMPTY]",
+      "description": "Query a range across multiple time series by filters in forward direction",
+      "since": "1.0.0"
+    },
+    {
+      "name": "TS.MREVRANGE",
+      "group": "Time series commands",
+      "url": "https://redis.io/commands/ts.mrevrange/",
+      "syntax": "TS.MREVRANGE fromTimestamp toTimestamp [LATEST]\n  [FILTER BY TS Timestamp [Timestamp ...]] [FILTER BY VALUE min max]\n  [WITHLABELS | SELECTED LABELS label1 [label1 ...]] [COUNT count]\n  [[ALIGN value] AGGREGATION aggregators bucketDuration\n  [BUCKETTIMESTAMP] [EMPTY]] FILTER <l=v | l!=v | l= | l!= |\n  l=(v1,v2,...) | l!=(v1,v2,...) [l=v | l!=v | l= | l!= |\n  l=(v1,v2,...) | l!=(v1,v2,...) ...]> [GROUPBY label REDUCE\n  reducer] [EXCLUDEEMPTY]",
+      "description": "Query a range across multiple time-series by filters in reverse direction",
+      "since": "1.4.0"
+    },
+    {
+      "name": "TS.NRANGE",
+      "group": "Time series commands",
+      "url": "https://redis.io/commands/ts.nrange/",
+      "syntax": "TS.NRANGE numkeys key [key ...] fromTimestamp toTimestamp [LATEST]\n  [FILTER BY TS ts [ts ...]] [FILTER BY VALUE min max] [COUNT count]\n  [[ALIGN align] AGGREGATION aggregators [aggregators ...] bucketDuration\n  [BUCKETTIMESTAMP <start | - | end | + | mid | ~>] [EMPTY]]",
+      "description": "Query a range across multiple time series in forward direction, returning the results grouped by timestamp",
+      "since": "8.10.0"
+    },
+    {
+      "name": "TS.NREVRANGE",
+      "group": "Time series commands",
+      "url": "https://redis.io/commands/ts.nrevrange/",
+      "syntax": "TS.NREVRANGE numkeys key [key ...] fromTimestamp toTimestamp\n  [LATEST] [FILTER BY TS ts [ts ...]] [FILTER BY VALUE min max]\n  [COUNT count] [[ALIGN align] AGGREGATION aggregators [aggregators ...]\n  bucketDuration [BUCKETTIMESTAMP <start | - | end | + | mid | ~>]\n  [EMPTY]]",
+      "description": "Query a range across multiple time series in reverse direction, returning the results grouped by timestamp",
+      "since": "8.10.0"
+    },
+    {
+      "name": "TS.QUERYINDEX",
+      "group": "Time series commands",
+      "url": "https://redis.io/commands/ts.queryindex/",
+      "syntax": "TS.QUERYINDEX <l=v | l!=v | l= | l!= | l=(v1,v2,...) |\n  l!=(v1,v2,...) [l=v | l!=v | l= | l!= | l=(v1,v2,...) |\n  l!=(v1,v2,...) ...]>",
+      "description": "Get all time series keys matching a filter list",
+      "since": "1.0.0"
+    },
+    {
+      "name": "TS.QUERYLABELS",
+      "group": "Time series commands",
+      "url": "https://redis.io/commands/ts.querylabels/",
+      "syntax": "TS.QUERYLABELS <LABELS | VALUES label> [FILTER filterExpr\n  [filterExpr ...]]",
+      "description": "Get all label names, or all values of a given label, for time series matching a filter list, or all series",
+      "since": "8.10.0"
+    },
+    {
+      "name": "TS.RANGE",
+      "group": "Time series commands",
+      "url": "https://redis.io/commands/ts.range/",
+      "syntax": "TS.RANGE key fromTimestamp toTimestamp [LATEST]\n  [FILTER BY TS Timestamp [Timestamp ...]] [FILTER BY VALUE min max]\n  [COUNT count] [[ALIGN value] AGGREGATION aggregators bucketDuration [BUCKETTIMESTAMP] [EMPTY]]",
+      "description": "Query a range in forward direction",
+      "since": "1.0.0"
+    },
+    {
+      "name": "TS.READ",
+      "group": "Time series commands",
+      "url": "https://redis.io/commands/ts.read/",
+      "syntax": "TS.READ key timestamp [BLOCK milliseconds min count]\n  [MAX COUNT max count]",
+      "description": "Read: return up to max_count samples with timestamp >= timestamp. With BLOCK, waits up to milliseconds ms until at least min_count qualifying samples exist",
+      "since": "8.10.0"
+    },
+    {
+      "name": "TS.REVRANGE",
+      "group": "Time series commands",
+      "url": "https://redis.io/commands/ts.revrange/",
+      "syntax": "TS.REVRANGE key fromTimestamp toTimestamp [LATEST]\n  [FILTER BY TS Timestamp [Timestamp ...]] [FILTER BY VALUE min max]\n  [COUNT count] [[ALIGN value] AGGREGATION aggregators\n  bucketDuration [BUCKETTIMESTAMP] [EMPTY]]",
+      "description": "Query a range in reverse direction",
+      "since": "1.4.0"
+    },
+    {
+      "name": "VADD",
+      "group": "Vector set commands",
+      "url": "https://redis.io/commands/vadd/",
+      "syntax": "VADD key [REDUCE dim] (FP32 | VALUES num) vector element [CAS] [NOQUANT | Q8 | BIN]\n  [EF build-exploration-factor] [SETATTR attributes] [M numlinks]",
+      "description": "Add a new element to a vector set, or update its vector if it already exists.",
+      "since": "8.0.0"
+    },
+    {
+      "name": "VCARD",
+      "group": "Vector set commands",
+      "url": "https://redis.io/commands/vcard/",
+      "syntax": "VCARD key",
+      "description": "Return the number of elements in a vector set.",
+      "since": "8.0.0"
+    },
+    {
+      "name": "VDIM",
+      "group": "Vector set commands",
+      "url": "https://redis.io/commands/vdim/",
+      "syntax": "VDIM key",
+      "description": "Return the dimension of vectors in the vector set.",
+      "since": "8.0.0"
+    },
+    {
+      "name": "VEMB",
+      "group": "Vector set commands",
+      "url": "https://redis.io/commands/vemb/",
+      "syntax": "VEMB key element [RAW]",
+      "description": "Return the vector associated with an element.",
+      "since": "8.0.0"
+    },
+    {
+      "name": "VGETATTR",
+      "group": "Vector set commands",
+      "url": "https://redis.io/commands/vgetattr/",
+      "syntax": "VGETATTR key element",
+      "description": "Retrieve the JSON attributes of elements.",
+      "since": "8.0.0"
+    },
+    {
+      "name": "VINFO",
+      "group": "Vector set commands",
+      "url": "https://redis.io/commands/vinfo/",
+      "syntax": "VINFO key",
+      "description": "Return information about a vector set.",
+      "since": "8.0.0"
+    },
+    {
+      "name": "VISMEMBER",
+      "group": "Vector set commands",
+      "url": "https://redis.io/commands/vismember/",
+      "syntax": "VISMEMBER key element",
+      "description": "Check if an element exists in a vector set.",
+      "since": "8.0.0"
+    },
+    {
+      "name": "VLINKS",
+      "group": "Vector set commands",
+      "url": "https://redis.io/commands/vlinks/",
+      "syntax": "VLINKS key element [WITHSCORES]",
+      "description": "Return the neighbors of an element at each layer in the HNSW graph.",
+      "since": "8.0.0"
+    },
+    {
+      "name": "VRANDMEMBER",
+      "group": "Vector set commands",
+      "url": "https://redis.io/commands/vrandmember/",
+      "syntax": "VRANDMEMBER key [count]",
+      "description": "Return one or multiple random members from a vector set.",
+      "since": "8.0.0"
+    },
+    {
+      "name": "VRANGE",
+      "group": "Vector set commands",
+      "url": "https://redis.io/commands/vrange/",
+      "syntax": "VRANGE key start end [count]",
+      "description": "Return elements in a lexicographical range",
+      "since": "8.4.0"
+    },
+    {
+      "name": "VREM",
+      "group": "Vector set commands",
+      "url": "https://redis.io/commands/vrem/",
+      "syntax": "VREM key element",
+      "description": "Remove an element from a vector set.",
+      "since": "8.0.0"
+    },
+    {
+      "name": "VSETATTR",
+      "group": "Vector set commands",
+      "url": "https://redis.io/commands/vsetattr/",
+      "syntax": "VSETATTR key element \"{ JSON obj }\"",
+      "description": "Associate or remove the JSON attributes of elements.",
+      "since": "8.0.0"
+    },
+    {
+      "name": "VSIM",
+      "group": "Vector set commands",
+      "url": "https://redis.io/commands/vsim/",
+      "syntax": "VSIM key (ELE | FP32 | VALUES num) (vector | element) [WITHSCORES] [WITHATTRIBS] [COUNT num]\n  [EPSILON delta] [EF search-exploration-factor] [FILTER expression] [FILTER-EF max-filtering-effort]\n  [TRUTH] [NOTHREAD]",
+      "description": "Return elements by vector similarity.",
+      "since": "8.0.0"
+    },
+    {
+      "name": "PSUBSCRIBE",
+      "group": "Pub/Sub commands",
+      "url": "https://redis.io/commands/psubscribe/",
+      "syntax": "PSUBSCRIBE pattern [pattern ...]",
+      "description": "Listens for messages published to channels that match one or more patterns.",
+      "since": "2.0.0"
+    },
+    {
+      "name": "PUBLISH",
+      "group": "Pub/Sub commands",
+      "url": "https://redis.io/commands/publish/",
+      "syntax": "PUBLISH channel message",
+      "description": "Posts a message to a channel.",
+      "since": "2.0.0"
+    },
+    {
+      "name": "PUBSUB CHANNELS",
+      "group": "Pub/Sub commands",
+      "url": "https://redis.io/commands/pubsub-channels/",
+      "syntax": "PUBSUB CHANNELS [pattern]",
+      "description": "Returns the active channels.",
+      "since": "2.8.0"
+    },
+    {
+      "name": "PUBSUB NUMPAT",
+      "group": "Pub/Sub commands",
+      "url": "https://redis.io/commands/pubsub-numpat/",
+      "syntax": "PUBSUB NUMPAT",
+      "description": "Returns a count of unique pattern subscriptions.",
+      "since": "2.8.0"
+    },
+    {
+      "name": "PUBSUB NUMSUB",
+      "group": "Pub/Sub commands",
+      "url": "https://redis.io/commands/pubsub-numsub/",
+      "syntax": "PUBSUB NUMSUB [channel [channel ...]]",
+      "description": "Returns a count of subscribers to channels.",
+      "since": "2.8.0"
+    },
+    {
+      "name": "PUBSUB SHARDCHANNELS",
+      "group": "Pub/Sub commands",
+      "url": "https://redis.io/commands/pubsub-shardchannels/",
+      "syntax": "PUBSUB SHARDCHANNELS [pattern]",
+      "description": "Returns the active shard channels.",
+      "since": "7.0.0"
+    },
+    {
+      "name": "PUBSUB SHARDNUMSUB",
+      "group": "Pub/Sub commands",
+      "url": "https://redis.io/commands/pubsub-shardnumsub/",
+      "syntax": "PUBSUB SHARDNUMSUB [shardchannel [shardchannel ...]]",
+      "description": "Returns the count of subscribers of shard channels.",
+      "since": "7.0.0"
+    },
+    {
+      "name": "PUNSUBSCRIBE",
+      "group": "Pub/Sub commands",
+      "url": "https://redis.io/commands/punsubscribe/",
+      "syntax": "PUNSUBSCRIBE [pattern [pattern ...]]",
+      "description": "Stops listening to messages published to channels that match one or more patterns.",
+      "since": "2.0.0"
+    },
+    {
+      "name": "SPUBLISH",
+      "group": "Pub/Sub commands",
+      "url": "https://redis.io/commands/spublish/",
+      "syntax": "SPUBLISH shardchannel message",
+      "description": "Post a message to a shard channel",
+      "since": "7.0.0"
+    },
+    {
+      "name": "SSUBSCRIBE",
+      "group": "Pub/Sub commands",
+      "url": "https://redis.io/commands/ssubscribe/",
+      "syntax": "SSUBSCRIBE shardchannel [shardchannel ...]",
+      "description": "Listens for messages published to shard channels.",
+      "since": "7.0.0"
+    },
+    {
+      "name": "SUBSCRIBE",
+      "group": "Pub/Sub commands",
+      "url": "https://redis.io/commands/subscribe/",
+      "syntax": "SUBSCRIBE channel [channel ...]",
+      "description": "Listens for messages published to channels.",
+      "since": "2.0.0"
+    },
+    {
+      "name": "SUNSUBSCRIBE",
+      "group": "Pub/Sub commands",
+      "url": "https://redis.io/commands/sunsubscribe/",
+      "syntax": "SUNSUBSCRIBE [shardchannel [shardchannel ...]]",
+      "description": "Stops listening to messages posted to shard channels.",
+      "since": "7.0.0"
+    },
+    {
+      "name": "UNSUBSCRIBE",
+      "group": "Pub/Sub commands",
+      "url": "https://redis.io/commands/unsubscribe/",
+      "syntax": "UNSUBSCRIBE [channel [channel ...]]",
+      "description": "Stops listening to messages posted to channels.",
+      "since": "2.0.0"
+    },
+    {
+      "name": "DISCARD",
+      "group": "Transaction commands",
+      "url": "https://redis.io/commands/discard/",
+      "syntax": "DISCARD",
+      "description": "Discards a transaction.",
+      "since": "2.0.0"
+    },
+    {
+      "name": "EXEC",
+      "group": "Transaction commands",
+      "url": "https://redis.io/commands/exec/",
+      "syntax": "EXEC",
+      "description": "Executes all commands in a transaction.",
+      "since": "1.2.0"
+    },
+    {
+      "name": "MULTI",
+      "group": "Transaction commands",
+      "url": "https://redis.io/commands/multi/",
+      "syntax": "MULTI",
+      "description": "Starts a transaction.",
+      "since": "1.2.0"
+    },
+    {
+      "name": "UNWATCH",
+      "group": "Transaction commands",
+      "url": "https://redis.io/commands/unwatch/",
+      "syntax": "UNWATCH",
+      "description": "Forgets about watched keys of a transaction.",
+      "since": "2.2.0"
+    },
+    {
+      "name": "WATCH",
+      "group": "Transaction commands",
+      "url": "https://redis.io/commands/watch/",
+      "syntax": "WATCH key [key ...]",
+      "description": "Monitors changes to keys to determine the execution of a transaction.",
+      "since": "2.2.0"
+    },
+    {
+      "name": "EVAL",
+      "group": "Scripting commands",
+      "url": "https://redis.io/commands/eval/",
+      "syntax": "EVAL script numkeys [key [key ...]] [arg [arg ...]]",
+      "description": "Executes a server-side Lua script.",
+      "since": "2.6.0"
+    },
+    {
+      "name": "EVALSHA",
+      "group": "Scripting commands",
+      "url": "https://redis.io/commands/evalsha/",
+      "syntax": "EVALSHA sha1 numkeys [key [key ...]] [arg [arg ...]]",
+      "description": "Executes a server-side Lua script by SHA1 digest.",
+      "since": "2.6.0"
+    },
+    {
+      "name": "EVALSHA_RO",
+      "group": "Scripting commands",
+      "url": "https://redis.io/commands/evalsha_ro/",
+      "syntax": "EVALSHA RO sha1 numkeys [key [key ...]] [arg [arg ...]]",
+      "description": "Executes a read-only server-side Lua script by SHA1 digest.",
+      "since": "7.0.0"
+    },
+    {
+      "name": "EVAL_RO",
+      "group": "Scripting commands",
+      "url": "https://redis.io/commands/eval_ro/",
+      "syntax": "EVAL RO script numkeys [key [key ...]] [arg [arg ...]]",
+      "description": "Executes a read-only server-side Lua script.",
+      "since": "7.0.0"
+    },
+    {
+      "name": "FCALL",
+      "group": "Scripting commands",
+      "url": "https://redis.io/commands/fcall/",
+      "syntax": "FCALL function numkeys [key [key ...]] [arg [arg ...]]",
+      "description": "Invokes a function.",
+      "since": "7.0.0"
+    },
+    {
+      "name": "FCALL_RO",
+      "group": "Scripting commands",
+      "url": "https://redis.io/commands/fcall_ro/",
+      "syntax": "FCALL RO function numkeys [key [key ...]] [arg [arg ...]]",
+      "description": "Invokes a read-only function.",
+      "since": "7.0.0"
+    },
+    {
+      "name": "FUNCTION DELETE",
+      "group": "Scripting commands",
+      "url": "https://redis.io/commands/function-delete/",
+      "syntax": "FUNCTION DELETE library-name",
+      "description": "Deletes a library and its functions.",
+      "since": "7.0.0"
+    },
+    {
+      "name": "FUNCTION DUMP",
+      "group": "Scripting commands",
+      "url": "https://redis.io/commands/function-dump/",
+      "syntax": "FUNCTION DUMP",
+      "description": "Dumps all libraries into a serialized binary payload.",
+      "since": "7.0.0"
+    },
+    {
+      "name": "FUNCTION FLUSH",
+      "group": "Scripting commands",
+      "url": "https://redis.io/commands/function-flush/",
+      "syntax": "FUNCTION FLUSH [ASYNC | SYNC]",
+      "description": "Deletes all libraries and functions.",
+      "since": "7.0.0"
+    },
+    {
+      "name": "FUNCTION KILL",
+      "group": "Scripting commands",
+      "url": "https://redis.io/commands/function-kill/",
+      "syntax": "FUNCTION KILL",
+      "description": "Terminates a function during execution.",
+      "since": "7.0.0"
+    },
+    {
+      "name": "FUNCTION LIST",
+      "group": "Scripting commands",
+      "url": "https://redis.io/commands/function-list/",
+      "syntax": "FUNCTION LIST [LIBRARYNAME library-name-pattern] [WITHCODE]",
+      "description": "Returns information about all libraries.",
+      "since": "7.0.0"
+    },
+    {
+      "name": "FUNCTION LOAD",
+      "group": "Scripting commands",
+      "url": "https://redis.io/commands/function-load/",
+      "syntax": "FUNCTION LOAD [REPLACE] function-code",
+      "description": "Creates a library.",
+      "since": "7.0.0"
+    },
+    {
+      "name": "FUNCTION RESTORE",
+      "group": "Scripting commands",
+      "url": "https://redis.io/commands/function-restore/",
+      "syntax": "FUNCTION RESTORE serialized-value [FLUSH | APPEND | REPLACE]",
+      "description": "Restores all libraries from a payload.",
+      "since": "7.0.0"
+    },
+    {
+      "name": "FUNCTION STATS",
+      "group": "Scripting commands",
+      "url": "https://redis.io/commands/function-stats/",
+      "syntax": "FUNCTION STATS",
+      "description": "Returns information about a function during execution.",
+      "since": "7.0.0"
+    },
+    {
+      "name": "SCRIPT DEBUG",
+      "group": "Scripting commands",
+      "url": "https://redis.io/commands/script-debug/",
+      "syntax": "SCRIPT DEBUG <YES | SYNC | NO>",
+      "description": "Sets the debug mode of server-side Lua scripts.",
+      "since": "3.2.0"
+    },
+    {
+      "name": "SCRIPT EXISTS",
+      "group": "Scripting commands",
+      "url": "https://redis.io/commands/script-exists/",
+      "syntax": "SCRIPT EXISTS sha1 [sha1 ...]",
+      "description": "Determines whether server-side Lua scripts exist in the script cache.",
+      "since": "2.6.0"
+    },
+    {
+      "name": "SCRIPT FLUSH",
+      "group": "Scripting commands",
+      "url": "https://redis.io/commands/script-flush/",
+      "syntax": "SCRIPT FLUSH [ASYNC | SYNC]",
+      "description": "Removes all server-side Lua scripts from the script cache.",
+      "since": "2.6.0"
+    },
+    {
+      "name": "SCRIPT KILL",
+      "group": "Scripting commands",
+      "url": "https://redis.io/commands/script-kill/",
+      "syntax": "SCRIPT KILL",
+      "description": "Terminates a server-side Lua script during execution.",
+      "since": "2.6.0"
+    },
+    {
+      "name": "SCRIPT LOAD",
+      "group": "Scripting commands",
+      "url": "https://redis.io/commands/script-load/",
+      "syntax": "SCRIPT LOAD script",
+      "description": "Loads a server-side Lua script to the script cache.",
+      "since": "2.6.0"
+    },
+    {
+      "name": "AUTH",
+      "group": "Connection commands",
+      "url": "https://redis.io/commands/auth/",
+      "syntax": "AUTH [username] password",
+      "description": "Authenticates the connection.",
+      "since": "1.0.0"
+    },
+    {
+      "name": "CLIENT CACHING",
+      "group": "Connection commands",
+      "url": "https://redis.io/commands/client-caching/",
+      "syntax": "CLIENT CACHING <YES | NO>",
+      "description": "Instructs the server whether to track the keys in the next request.",
+      "since": "6.0.0"
+    },
+    {
+      "name": "CLIENT GETNAME",
+      "group": "Connection commands",
+      "url": "https://redis.io/commands/client-getname/",
+      "syntax": "CLIENT GETNAME",
+      "description": "Returns the name of the connection.",
+      "since": "2.6.9"
+    },
+    {
+      "name": "CLIENT GETREDIR",
+      "group": "Connection commands",
+      "url": "https://redis.io/commands/client-getredir/",
+      "syntax": "CLIENT GETREDIR",
+      "description": "Returns the client ID to which the connection's tracking notifications are redirected.",
+      "since": "6.0.0"
+    },
+    {
+      "name": "CLIENT ID",
+      "group": "Connection commands",
+      "url": "https://redis.io/commands/client-id/",
+      "syntax": "CLIENT ID",
+      "description": "Returns the unique client ID of the connection.",
+      "since": "5.0.0"
+    },
+    {
+      "name": "CLIENT INFO",
+      "group": "Connection commands",
+      "url": "https://redis.io/commands/client-info/",
+      "syntax": "CLIENT INFO",
+      "description": "Returns information about the connection.",
+      "since": "6.2.0"
+    },
+    {
+      "name": "CLIENT KILL",
+      "group": "Connection commands",
+      "url": "https://redis.io/commands/client-kill/",
+      "syntax": "CLIENT KILL <ip:port | <[ID client-id] | [TYPE <NORMAL | MASTER |\n  SLAVE | REPLICA | PUBSUB>] | [USER username] | [ADDR ip:port] |\n  [LADDR ip:port] | [SKIPME <YES | NO>] | [MAXAGE maxage]\n  [[ID client-id] | [TYPE <NORMAL | MASTER | SLAVE | REPLICA |\n  PUBSUB>] | [USER username] | [ADDR ip:port] | [LADDR ip:port] |\n  [SKIPME <YES | NO>] | [MAXAGE maxage] ...]>>",
+      "description": "Terminates open connections.",
+      "since": "2.4.0"
+    },
+    {
+      "name": "CLIENT LIST",
+      "group": "Connection commands",
+      "url": "https://redis.io/commands/client-list/",
+      "syntax": "CLIENT LIST [TYPE <NORMAL | MASTER | REPLICA | PUBSUB>]\n  [ID client-id [client-id ...]]",
+      "description": "Lists open connections.",
+      "since": "2.4.0"
+    },
+    {
+      "name": "CLIENT NO-EVICT",
+      "group": "Connection commands",
+      "url": "https://redis.io/commands/client-no-evict/",
+      "syntax": "CLIENT NO-EVICT <ON | OFF>",
+      "description": "Sets the client eviction mode of the connection.",
+      "since": "7.0.0"
+    },
+    {
+      "name": "CLIENT NO-TOUCH",
+      "group": "Connection commands",
+      "url": "https://redis.io/commands/client-no-touch/",
+      "syntax": "CLIENT NO-TOUCH <ON | OFF>",
+      "description": "Controls whether commands sent by the client affect the LRU/LFU of accessed keys.",
+      "since": "7.2.0"
+    },
+    {
+      "name": "CLIENT PAUSE",
+      "group": "Connection commands",
+      "url": "https://redis.io/commands/client-pause/",
+      "syntax": "CLIENT PAUSE timeout [WRITE | ALL]",
+      "description": "Suspends commands processing.",
+      "since": "3.0.0"
+    },
+    {
+      "name": "CLIENT REPLY",
+      "group": "Connection commands",
+      "url": "https://redis.io/commands/client-reply/",
+      "syntax": "CLIENT REPLY <ON | OFF | SKIP>",
+      "description": "Instructs the server whether to reply to commands.",
+      "since": "3.2.0"
+    },
+    {
+      "name": "CLIENT SETINFO",
+      "group": "Connection commands",
+      "url": "https://redis.io/commands/client-setinfo/",
+      "syntax": "CLIENT SETINFO <LIB-NAME libname | LIB-VER libver>",
+      "description": "Sets information specific to the client or connection.",
+      "since": "7.2.0"
+    },
+    {
+      "name": "CLIENT SETNAME",
+      "group": "Connection commands",
+      "url": "https://redis.io/commands/client-setname/",
+      "syntax": "CLIENT SETNAME connection-name",
+      "description": "Sets the connection name.",
+      "since": "2.6.9"
+    },
+    {
+      "name": "CLIENT TRACKING",
+      "group": "Connection commands",
+      "url": "https://redis.io/commands/client-tracking/",
+      "syntax": "CLIENT TRACKING <ON | OFF> [REDIRECT client-id] [PREFIX prefix\n  [PREFIX prefix ...]] [BCAST] [OPTIN] [OPTOUT] [NOLOOP]",
+      "description": "Controls server-assisted client-side caching for the connection.",
+      "since": "6.0.0"
+    },
+    {
+      "name": "CLIENT TRACKINGINFO",
+      "group": "Connection commands",
+      "url": "https://redis.io/commands/client-trackinginfo/",
+      "syntax": "CLIENT TRACKINGINFO",
+      "description": "Returns information about server-assisted client-side caching for the connection.",
+      "since": "6.2.0"
+    },
+    {
+      "name": "CLIENT UNBLOCK",
+      "group": "Connection commands",
+      "url": "https://redis.io/commands/client-unblock/",
+      "syntax": "CLIENT UNBLOCK client-id [TIMEOUT | ERROR]",
+      "description": "Unblocks a client blocked by a blocking command from a different connection.",
+      "since": "5.0.0"
+    },
+    {
+      "name": "CLIENT UNPAUSE",
+      "group": "Connection commands",
+      "url": "https://redis.io/commands/client-unpause/",
+      "syntax": "CLIENT UNPAUSE",
+      "description": "Resumes processing commands from paused clients.",
+      "since": "6.2.0"
+    },
+    {
+      "name": "ECHO",
+      "group": "Connection commands",
+      "url": "https://redis.io/commands/echo/",
+      "syntax": "ECHO message",
+      "description": "Returns the given string.",
+      "since": "1.0.0"
+    },
+    {
+      "name": "HELLO",
+      "group": "Connection commands",
+      "url": "https://redis.io/commands/hello/",
+      "syntax": "HELLO [protover [AUTH username password] [SETNAME clientname]]",
+      "description": "Handshakes with the Redis server.",
+      "since": "6.0.0"
+    },
+    {
+      "name": "PING",
+      "group": "Connection commands",
+      "url": "https://redis.io/commands/ping/",
+      "syntax": "PING [message]",
+      "description": "Returns the server's liveliness response.",
+      "since": "1.0.0"
+    },
+    {
+      "name": "QUIT",
+      "group": "Connection commands",
+      "url": "https://redis.io/commands/quit/",
+      "syntax": "QUIT",
+      "description": "Closes the connection.",
+      "since": "1.0.0"
+    },
+    {
+      "name": "RESET",
+      "group": "Connection commands",
+      "url": "https://redis.io/commands/reset/",
+      "syntax": "RESET",
+      "description": "Resets the connection.",
+      "since": "6.2.0"
+    },
+    {
+      "name": "SELECT",
+      "group": "Connection commands",
+      "url": "https://redis.io/commands/select/",
+      "syntax": "SELECT index",
+      "description": "Changes the selected database.",
+      "since": "1.0.0"
+    },
+    {
+      "name": "ACL CAT",
+      "group": "Server commands",
+      "url": "https://redis.io/commands/acl-cat/",
+      "syntax": "ACL CAT [category]",
+      "description": "Lists the ACL categories, or the commands inside a category.",
+      "since": "6.0.0"
+    },
+    {
+      "name": "ACL DELUSER",
+      "group": "Server commands",
+      "url": "https://redis.io/commands/acl-deluser/",
+      "syntax": "ACL DELUSER username [username ...]",
+      "description": "Deletes ACL users, and terminates their connections.",
+      "since": "6.0.0"
+    },
+    {
+      "name": "ACL DRYRUN",
+      "group": "Server commands",
+      "url": "https://redis.io/commands/acl-dryrun/",
+      "syntax": "ACL DRYRUN username command [arg [arg ...]]",
+      "description": "Simulates the execution of a command by a user, without executing the command.",
+      "since": "7.0.0"
+    },
+    {
+      "name": "ACL GENPASS",
+      "group": "Server commands",
+      "url": "https://redis.io/commands/acl-genpass/",
+      "syntax": "ACL GENPASS [bits]",
+      "description": "Generates a pseudorandom, secure password that can be used to identify ACL users.",
+      "since": "6.0.0"
+    },
+    {
+      "name": "ACL GETUSER",
+      "group": "Server commands",
+      "url": "https://redis.io/commands/acl-getuser/",
+      "syntax": "ACL GETUSER username",
+      "description": "Lists the ACL rules of a user.",
+      "since": "6.0.0"
+    },
+    {
+      "name": "ACL LIST",
+      "group": "Server commands",
+      "url": "https://redis.io/commands/acl-list/",
+      "syntax": "ACL LIST",
+      "description": "Dumps the effective rules in ACL file format.",
+      "since": "6.0.0"
+    },
+    {
+      "name": "ACL LOAD",
+      "group": "Server commands",
+      "url": "https://redis.io/commands/acl-load/",
+      "syntax": "ACL LOAD",
+      "description": "Reloads the rules from the configured ACL file.",
+      "since": "6.0.0"
+    },
+    {
+      "name": "ACL LOG",
+      "group": "Server commands",
+      "url": "https://redis.io/commands/acl-log/",
+      "syntax": "ACL LOG [count | RESET]",
+      "description": "Lists recent security events generated due to ACL rules.",
+      "since": "6.0.0"
+    },
+    {
+      "name": "ACL SAVE",
+      "group": "Server commands",
+      "url": "https://redis.io/commands/acl-save/",
+      "syntax": "ACL SAVE",
+      "description": "Saves the effective ACL rules in the configured ACL file.",
+      "since": "6.0.0"
+    },
+    {
+      "name": "ACL SETUSER",
+      "group": "Server commands",
+      "url": "https://redis.io/commands/acl-setuser/",
+      "syntax": "ACL SETUSER username [rule [rule ...]]",
+      "description": "Creates and modifies an ACL user and its rules.",
+      "since": "6.0.0"
+    },
+    {
+      "name": "ACL USERS",
+      "group": "Server commands",
+      "url": "https://redis.io/commands/acl-users/",
+      "syntax": "ACL USERS",
+      "description": "Lists all ACL users.",
+      "since": "6.0.0"
+    },
+    {
+      "name": "ACL WHOAMI",
+      "group": "Server commands",
+      "url": "https://redis.io/commands/acl-whoami/",
+      "syntax": "ACL WHOAMI",
+      "description": "Returns the authenticated username of the current connection.",
+      "since": "6.0.0"
+    },
+    {
+      "name": "BACKUP ABORT",
+      "group": "Server commands",
+      "url": "https://redis.io/commands/backup-abort/",
+      "syntax": "BACKUP ABORT",
+      "description": "Cancel a backup that has not been sealed yet.",
+      "since": "8.10.0"
+    },
+    {
+      "name": "BACKUP CLEANUP",
+      "group": "Server commands",
+      "url": "https://redis.io/commands/backup-cleanup/",
+      "syntax": "BACKUP CLEANUP",
+      "description": "Remove sealed backup files and return to idle.",
+      "since": "8.10.0"
+    },
+    {
+      "name": "BACKUP LIST",
+      "group": "Server commands",
+      "url": "https://redis.io/commands/backup-list/",
+      "syntax": "BACKUP LIST",
+      "description": "List the immutable backup file paths pinned so far.",
+      "since": "8.10.0"
+    },
+    {
+      "name": "BACKUP SEAL",
+      "group": "Server commands",
+      "url": "https://redis.io/commands/backup-seal/",
+      "syntax": "BACKUP SEAL",
+      "description": "Freeze the current backup (BASE + INCR + manifest).",
+      "since": "8.10.0"
+    },
+    {
+      "name": "BACKUP START",
+      "group": "Server commands",
+      "url": "https://redis.io/commands/backup-start/",
+      "syntax": "BACKUP START",
+      "description": "Start a new backup into the configured 'backupdirname'.",
+      "since": "8.10.0"
+    },
+    {
+      "name": "BACKUP STATUS",
+      "group": "Server commands",
+      "url": "https://redis.io/commands/backup-status/",
+      "syntax": "BACKUP STATUS",
+      "description": "Report the current backup state.",
+      "since": "8.10.0"
+    },
+    {
+      "name": "BGREWRITEAOF",
+      "group": "Server commands",
+      "url": "https://redis.io/commands/bgrewriteaof/",
+      "syntax": "BGREWRITEAOF",
+      "description": "Asynchronously rewrites the append-only file to disk.",
+      "since": "1.0.0"
+    },
+    {
+      "name": "BGSAVE",
+      "group": "Server commands",
+      "url": "https://redis.io/commands/bgsave/",
+      "syntax": "BGSAVE [SCHEDULE]",
+      "description": "Asynchronously saves the database(s) to disk.",
+      "since": "1.0.0"
+    },
+    {
+      "name": "COMMAND",
+      "group": "Server commands",
+      "url": "https://redis.io/commands/command/",
+      "syntax": "COMMAND",
+      "description": "Returns detailed information about all commands.",
+      "since": "2.8.13"
+    },
+    {
+      "name": "COMMAND COUNT",
+      "group": "Server commands",
+      "url": "https://redis.io/commands/command-count/",
+      "syntax": "COMMAND COUNT",
+      "description": "Returns a count of commands.",
+      "since": "2.8.13"
+    },
+    {
+      "name": "COMMAND DOCS",
+      "group": "Server commands",
+      "url": "https://redis.io/commands/command-docs/",
+      "syntax": "COMMAND DOCS [command-name [command-name ...]]",
+      "description": "Returns documentary information about one, multiple or all commands.",
+      "since": "7.0.0"
+    },
+    {
+      "name": "COMMAND GETKEYS",
+      "group": "Server commands",
+      "url": "https://redis.io/commands/command-getkeys/",
+      "syntax": "COMMAND GETKEYS command [arg [arg ...]]",
+      "description": "Extracts the key names from an arbitrary command.",
+      "since": "2.8.13"
+    },
+    {
+      "name": "COMMAND GETKEYSANDFLAGS",
+      "group": "Server commands",
+      "url": "https://redis.io/commands/command-getkeysandflags/",
+      "syntax": "COMMAND GETKEYSANDFLAGS command [arg [arg ...]]",
+      "description": "Extracts the key names and access flags for an arbitrary command.",
+      "since": "7.0.0"
+    },
+    {
+      "name": "COMMAND INFO",
+      "group": "Server commands",
+      "url": "https://redis.io/commands/command-info/",
+      "syntax": "COMMAND INFO [command-name [command-name ...]]",
+      "description": "Returns information about one, multiple or all commands.",
+      "since": "2.8.13"
+    },
+    {
+      "name": "COMMAND LIST",
+      "group": "Server commands",
+      "url": "https://redis.io/commands/command-list/",
+      "syntax": "COMMAND LIST [FILTERBY <MODULE module-name | ACLCAT category |\n  PATTERN pattern>]",
+      "description": "Returns a list of command names.",
+      "since": "7.0.0"
+    },
+    {
+      "name": "CONFIG GET",
+      "group": "Server commands",
+      "url": "https://redis.io/commands/config-get/",
+      "syntax": "CONFIG GET parameter [parameter ...]",
+      "description": "Returns the effective values of configuration parameters.",
+      "since": "2.0.0"
+    },
+    {
+      "name": "CONFIG RESETSTAT",
+      "group": "Server commands",
+      "url": "https://redis.io/commands/config-resetstat/",
+      "syntax": "CONFIG RESETSTAT",
+      "description": "Resets the server's statistics.",
+      "since": "2.0.0"
+    },
+    {
+      "name": "CONFIG REWRITE",
+      "group": "Server commands",
+      "url": "https://redis.io/commands/config-rewrite/",
+      "syntax": "CONFIG REWRITE",
+      "description": "Persists the effective configuration to file.",
+      "since": "2.8.0"
+    },
+    {
+      "name": "CONFIG SET",
+      "group": "Server commands",
+      "url": "https://redis.io/commands/config-set/",
+      "syntax": "CONFIG SET parameter value [parameter value ...]",
+      "description": "Sets configuration parameters in-flight.",
+      "since": "2.0.0"
+    },
+    {
+      "name": "DBSIZE",
+      "group": "Server commands",
+      "url": "https://redis.io/commands/dbsize/",
+      "syntax": "DBSIZE",
+      "description": "Returns the number of keys in the database.",
+      "since": "1.0.0"
+    },
+    {
+      "name": "FAILOVER",
+      "group": "Server commands",
+      "url": "https://redis.io/commands/failover/",
+      "syntax": "FAILOVER [TO host port [FORCE]] [ABORT] [TIMEOUT milliseconds]",
+      "description": "Starts a coordinated failover from a server to one of its replicas.",
+      "since": "6.2.0"
+    },
+    {
+      "name": "FLUSHALL",
+      "group": "Server commands",
+      "url": "https://redis.io/commands/flushall/",
+      "syntax": "FLUSHALL [ASYNC | SYNC]",
+      "description": "Removes all keys from all databases.",
+      "since": "1.0.0"
+    },
+    {
+      "name": "FLUSHDB",
+      "group": "Server commands",
+      "url": "https://redis.io/commands/flushdb/",
+      "syntax": "FLUSHDB [ASYNC | SYNC]",
+      "description": "Remove all keys from the current database.",
+      "since": "1.0.0"
+    },
+    {
+      "name": "HOTKEYS",
+      "group": "Server commands",
+      "url": "https://redis.io/commands/hotkeys/",
+      "syntax": "HOTKEYS",
+      "description": "A container for hotkeys tracking commands.",
+      "since": "8.6.0"
+    },
+    {
+      "name": "HOTKEYS GET",
+      "group": "Server commands",
+      "url": "https://redis.io/commands/hotkeys-get/",
+      "syntax": "HOTKEYS GET",
+      "description": "Returns lists of top K hotkeys depending on metrics chosen in HOTKEYS START command.",
+      "since": "8.6.0"
+    },
+    {
+      "name": "HOTKEYS RESET",
+      "group": "Server commands",
+      "url": "https://redis.io/commands/hotkeys-reset/",
+      "syntax": "HOTKEYS RESET",
+      "description": "Release the resources used for hotkey tracking.",
+      "since": "8.6.0"
+    },
+    {
+      "name": "HOTKEYS START",
+      "group": "Server commands",
+      "url": "https://redis.io/commands/hotkeys-start/",
+      "syntax": "HOTKEYS START METRICS count [CPU] [NET] [COUNT k] [DURATION seconds] [SAMPLE ratio] [SLOTS count slot [slot ...]]",
+      "description": "Starts hotkeys tracking.",
+      "since": "8.6.0"
+    },
+    {
+      "name": "HOTKEYS STOP",
+      "group": "Server commands",
+      "url": "https://redis.io/commands/hotkeys-stop/",
+      "syntax": "HOTKEYS STOP",
+      "description": "Stops hotkeys tracking.",
+      "since": "8.6.0"
+    },
+    {
+      "name": "INFO",
+      "group": "Server commands",
+      "url": "https://redis.io/commands/info/",
+      "syntax": "INFO [section [section ...]]",
+      "description": "Returns information and statistics about the server.",
+      "since": "1.0.0"
+    },
+    {
+      "name": "LASTSAVE",
+      "group": "Server commands",
+      "url": "https://redis.io/commands/lastsave/",
+      "syntax": "LASTSAVE",
+      "description": "Returns the Unix timestamp of the last successful save to disk.",
+      "since": "1.0.0"
+    },
+    {
+      "name": "LATENCY DOCTOR",
+      "group": "Server commands",
+      "url": "https://redis.io/commands/latency-doctor/",
+      "syntax": "LATENCY DOCTOR",
+      "description": "Returns a human-readable latency analysis report.",
+      "since": "2.8.13"
+    },
+    {
+      "name": "LATENCY GRAPH",
+      "group": "Server commands",
+      "url": "https://redis.io/commands/latency-graph/",
+      "syntax": "LATENCY GRAPH event",
+      "description": "Returns a latency graph for an event.",
+      "since": "2.8.13"
+    },
+    {
+      "name": "LATENCY HISTOGRAM",
+      "group": "Server commands",
+      "url": "https://redis.io/commands/latency-histogram/",
+      "syntax": "LATENCY HISTOGRAM [command [command ...]]",
+      "description": "Returns the cumulative distribution of latencies of a subset or all commands.",
+      "since": "7.0.0"
+    },
+    {
+      "name": "LATENCY HISTORY",
+      "group": "Server commands",
+      "url": "https://redis.io/commands/latency-history/",
+      "syntax": "LATENCY HISTORY event",
+      "description": "Returns timestamp-latency samples for an event.",
+      "since": "2.8.13"
+    },
+    {
+      "name": "LATENCY LATEST",
+      "group": "Server commands",
+      "url": "https://redis.io/commands/latency-latest/",
+      "syntax": "LATENCY LATEST",
+      "description": "Returns the latest latency samples for all events.",
+      "since": "2.8.13"
+    },
+    {
+      "name": "LATENCY RESET",
+      "group": "Server commands",
+      "url": "https://redis.io/commands/latency-reset/",
+      "syntax": "LATENCY RESET [event [event ...]]",
+      "description": "Resets the latency data for one or more events.",
+      "since": "2.8.13"
+    },
+    {
+      "name": "LOLWUT",
+      "group": "Server commands",
+      "url": "https://redis.io/commands/lolwut/",
+      "syntax": "LOLWUT [VERSION version]",
+      "description": "Displays computer art and the Redis version",
+      "since": "5.0.0"
+    },
+    {
+      "name": "MEMORY DOCTOR",
+      "group": "Server commands",
+      "url": "https://redis.io/commands/memory-doctor/",
+      "syntax": "MEMORY DOCTOR",
+      "description": "Outputs a memory problems report.",
+      "since": "4.0.0"
+    },
+    {
+      "name": "MEMORY MALLOC-STATS",
+      "group": "Server commands",
+      "url": "https://redis.io/commands/memory-malloc-stats/",
+      "syntax": "MEMORY MALLOC-STATS",
+      "description": "Returns the allocator statistics.",
+      "since": "4.0.0"
+    },
+    {
+      "name": "MEMORY PURGE",
+      "group": "Server commands",
+      "url": "https://redis.io/commands/memory-purge/",
+      "syntax": "MEMORY PURGE",
+      "description": "Asks the allocator to release memory.",
+      "since": "4.0.0"
+    },
+    {
+      "name": "MEMORY STATS",
+      "group": "Server commands",
+      "url": "https://redis.io/commands/memory-stats/",
+      "syntax": "MEMORY STATS",
+      "description": "Returns details about memory usage.",
+      "since": "4.0.0"
+    },
+    {
+      "name": "MEMORY USAGE",
+      "group": "Server commands",
+      "url": "https://redis.io/commands/memory-usage/",
+      "syntax": "MEMORY USAGE key [SAMPLES count]",
+      "description": "Estimates the memory usage of a key.",
+      "since": "4.0.0"
+    },
+    {
+      "name": "MODULE LIST",
+      "group": "Server commands",
+      "url": "https://redis.io/commands/module-list/",
+      "syntax": "MODULE LIST",
+      "description": "Returns all loaded modules.",
+      "since": "4.0.0"
+    },
+    {
+      "name": "MODULE LOAD",
+      "group": "Server commands",
+      "url": "https://redis.io/commands/module-load/",
+      "syntax": "MODULE LOAD path [arg [arg ...]]",
+      "description": "Loads a module.",
+      "since": "4.0.0"
+    },
+    {
+      "name": "MODULE LOADEX",
+      "group": "Server commands",
+      "url": "https://redis.io/commands/module-loadex/",
+      "syntax": "MODULE LOADEX path [CONFIG name value [CONFIG name value ...]]\n  [ARGS args [args ...]]",
+      "description": "Loads a module using extended parameters.",
+      "since": "7.0.0"
+    },
+    {
+      "name": "MODULE UNLOAD",
+      "group": "Server commands",
+      "url": "https://redis.io/commands/module-unload/",
+      "syntax": "MODULE UNLOAD name",
+      "description": "Unloads a module.",
+      "since": "4.0.0"
+    },
+    {
+      "name": "MONITOR",
+      "group": "Server commands",
+      "url": "https://redis.io/commands/monitor/",
+      "syntax": "MONITOR",
+      "description": "Listens for all requests received by the server in real-time.",
+      "since": "1.0.0"
+    },
+    {
+      "name": "PSYNC",
+      "group": "Server commands",
+      "url": "https://redis.io/commands/psync/",
+      "syntax": "PSYNC replicationid offset",
+      "description": "An internal command used in replication.",
+      "since": "2.8.0"
+    },
+    {
+      "name": "REPLCONF",
+      "group": "Server commands",
+      "url": "https://redis.io/commands/replconf/",
+      "syntax": "REPLCONF",
+      "description": "An internal command for configuring the replication stream.",
+      "since": "3.0.0"
+    },
+    {
+      "name": "REPLICAOF",
+      "group": "Server commands",
+      "url": "https://redis.io/commands/replicaof/",
+      "syntax": "REPLICAOF <host port | NO ONE>",
+      "description": "Configures a server as replica of another, or promotes it to a master.",
+      "since": "5.0.0"
+    },
+    {
+      "name": "RESTORE-ASKING",
+      "group": "Server commands",
+      "url": "https://redis.io/commands/restore-asking/",
+      "syntax": "RESTORE-ASKING key ttl serialized-value [REPLACE] [ABSTTL]\n  [IDLETIME seconds] [FREQ frequency]",
+      "description": "An internal command for migrating keys in a cluster.",
+      "since": "3.0.0"
+    },
+    {
+      "name": "ROLE",
+      "group": "Server commands",
+      "url": "https://redis.io/commands/role/",
+      "syntax": "ROLE",
+      "description": "Returns the replication role.",
+      "since": "2.8.12"
+    },
+    {
+      "name": "SAVE",
+      "group": "Server commands",
+      "url": "https://redis.io/commands/save/",
+      "syntax": "SAVE",
+      "description": "Synchronously saves the database(s) to disk.",
+      "since": "1.0.0"
+    },
+    {
+      "name": "SHUTDOWN",
+      "group": "Server commands",
+      "url": "https://redis.io/commands/shutdown/",
+      "syntax": "SHUTDOWN [NOSAVE | SAVE] [NOW] [FORCE] [ABORT]",
+      "description": "Synchronously saves the database(s) to disk and shuts down the Redis server.",
+      "since": "1.0.0"
+    },
+    {
+      "name": "SLAVEOF",
+      "group": "Server commands",
+      "url": "https://redis.io/commands/slaveof/",
+      "syntax": "SLAVEOF <host port | NO ONE>",
+      "description": "Sets a Redis server as a replica of another, or promotes it to being a master.",
+      "since": "1.0.0"
+    },
+    {
+      "name": "SLOWLOG GET",
+      "group": "Server commands",
+      "url": "https://redis.io/commands/slowlog-get/",
+      "syntax": "SLOWLOG GET [count]",
+      "description": "Returns the slow log's entries.",
+      "since": "2.2.12"
+    },
+    {
+      "name": "SLOWLOG LEN",
+      "group": "Server commands",
+      "url": "https://redis.io/commands/slowlog-len/",
+      "syntax": "SLOWLOG LEN",
+      "description": "Returns the number of entries in the slow log.",
+      "since": "2.2.12"
+    },
+    {
+      "name": "SLOWLOG RESET",
+      "group": "Server commands",
+      "url": "https://redis.io/commands/slowlog-reset/",
+      "syntax": "SLOWLOG RESET",
+      "description": "Clears all entries from the slow log.",
+      "since": "2.2.12"
+    },
+    {
+      "name": "SWAPDB",
+      "group": "Server commands",
+      "url": "https://redis.io/commands/swapdb/",
+      "syntax": "SWAPDB index1 index2",
+      "description": "Swaps two Redis databases.",
+      "since": "4.0.0"
+    },
+    {
+      "name": "SYNC",
+      "group": "Server commands",
+      "url": "https://redis.io/commands/sync/",
+      "syntax": "SYNC",
+      "description": "An internal command used in replication.",
+      "since": "1.0.0"
+    },
+    {
+      "name": "TIME",
+      "group": "Server commands",
+      "url": "https://redis.io/commands/time/",
+      "syntax": "TIME",
+      "description": "Returns the server time.",
+      "since": "2.6.0"
+    },
+    {
+      "name": "ASKING",
+      "group": "Cluster commands",
+      "url": "https://redis.io/commands/asking/",
+      "syntax": "ASKING",
+      "description": "Signals that a cluster client is following an -ASK redirect.",
+      "since": "3.0.0"
+    },
+    {
+      "name": "CLUSTER ADDSLOTS",
+      "group": "Cluster commands",
+      "url": "https://redis.io/commands/cluster-addslots/",
+      "syntax": "CLUSTER ADDSLOTS slot [slot ...]",
+      "description": "Assigns new hash slots to a node.",
+      "since": "3.0.0"
+    },
+    {
+      "name": "CLUSTER ADDSLOTSRANGE",
+      "group": "Cluster commands",
+      "url": "https://redis.io/commands/cluster-addslotsrange/",
+      "syntax": "CLUSTER ADDSLOTSRANGE start-slot end-slot [start-slot end-slot ...]",
+      "description": "Assigns new hash slot ranges to a node.",
+      "since": "7.0.0"
+    },
+    {
+      "name": "CLUSTER BUMPEPOCH",
+      "group": "Cluster commands",
+      "url": "https://redis.io/commands/cluster-bumpepoch/",
+      "syntax": "CLUSTER BUMPEPOCH",
+      "description": "Advances the cluster config epoch.",
+      "since": "3.0.0"
+    },
+    {
+      "name": "CLUSTER COUNT-FAILURE-REPORTS",
+      "group": "Cluster commands",
+      "url": "https://redis.io/commands/cluster-count-failure-reports/",
+      "syntax": "CLUSTER COUNT-FAILURE-REPORTS node-id",
+      "description": "Returns the number of active failure reports active for a node.",
+      "since": "3.0.0"
+    },
+    {
+      "name": "CLUSTER COUNTKEYSINSLOT",
+      "group": "Cluster commands",
+      "url": "https://redis.io/commands/cluster-countkeysinslot/",
+      "syntax": "CLUSTER COUNTKEYSINSLOT slot",
+      "description": "Returns the number of keys in a hash slot.",
+      "since": "3.0.0"
+    },
+    {
+      "name": "CLUSTER DELSLOTS",
+      "group": "Cluster commands",
+      "url": "https://redis.io/commands/cluster-delslots/",
+      "syntax": "CLUSTER DELSLOTS slot [slot ...]",
+      "description": "Sets hash slots as unbound for a node.",
+      "since": "3.0.0"
+    },
+    {
+      "name": "CLUSTER DELSLOTSRANGE",
+      "group": "Cluster commands",
+      "url": "https://redis.io/commands/cluster-delslotsrange/",
+      "syntax": "CLUSTER DELSLOTSRANGE start-slot end-slot [start-slot end-slot ...]",
+      "description": "Sets hash slot ranges as unbound for a node.",
+      "since": "7.0.0"
+    },
+    {
+      "name": "CLUSTER FAILOVER",
+      "group": "Cluster commands",
+      "url": "https://redis.io/commands/cluster-failover/",
+      "syntax": "CLUSTER FAILOVER [FORCE | TAKEOVER]",
+      "description": "Forces a replica to perform a manual failover of its master.",
+      "since": "3.0.0"
+    },
+    {
+      "name": "CLUSTER FLUSHSLOTS",
+      "group": "Cluster commands",
+      "url": "https://redis.io/commands/cluster-flushslots/",
+      "syntax": "CLUSTER FLUSHSLOTS",
+      "description": "Deletes all slots information from a node.",
+      "since": "3.0.0"
+    },
+    {
+      "name": "CLUSTER FORGET",
+      "group": "Cluster commands",
+      "url": "https://redis.io/commands/cluster-forget/",
+      "syntax": "CLUSTER FORGET node-id",
+      "description": "Removes a node from the nodes table.",
+      "since": "3.0.0"
+    },
+    {
+      "name": "CLUSTER GETKEYSINSLOT",
+      "group": "Cluster commands",
+      "url": "https://redis.io/commands/cluster-getkeysinslot/",
+      "syntax": "CLUSTER GETKEYSINSLOT slot count",
+      "description": "Returns the key names in a hash slot.",
+      "since": "3.0.0"
+    },
+    {
+      "name": "CLUSTER INFO",
+      "group": "Cluster commands",
+      "url": "https://redis.io/commands/cluster-info/",
+      "syntax": "CLUSTER INFO",
+      "description": "Returns information about the state of a node.",
+      "since": "3.0.0"
+    },
+    {
+      "name": "CLUSTER KEYSLOT",
+      "group": "Cluster commands",
+      "url": "https://redis.io/commands/cluster-keyslot/",
+      "syntax": "CLUSTER KEYSLOT key",
+      "description": "Returns the hash slot for a key.",
+      "since": "3.0.0"
+    },
+    {
+      "name": "CLUSTER LINKS",
+      "group": "Cluster commands",
+      "url": "https://redis.io/commands/cluster-links/",
+      "syntax": "CLUSTER LINKS",
+      "description": "Returns a list of all TCP links to and from peer nodes.",
+      "since": "7.0.0"
+    },
+    {
+      "name": "CLUSTER MEET",
+      "group": "Cluster commands",
+      "url": "https://redis.io/commands/cluster-meet/",
+      "syntax": "CLUSTER MEET ip port [cluster-bus-port]",
+      "description": "Forces a node to handshake with another node.",
+      "since": "3.0.0"
+    },
+    {
+      "name": "CLUSTER MIGRATION",
+      "group": "Cluster commands",
+      "url": "https://redis.io/commands/cluster-migration/",
+      "syntax": "CLUSTER MIGRATION <IMPORT start-slot end-slot\n  [start-slot end-slot ...] | CANCEL <ID task-id | ALL> |\n  STATUS <[ID task-id] | [ALL]>>",
+      "description": "Start, monitor, and cancel atomic slot migration tasks.",
+      "since": "8.4.0"
+    },
+    {
+      "name": "CLUSTER MYID",
+      "group": "Cluster commands",
+      "url": "https://redis.io/commands/cluster-myid/",
+      "syntax": "CLUSTER MYID",
+      "description": "Returns the ID of a node.",
+      "since": "3.0.0"
+    },
+    {
+      "name": "CLUSTER MYSHARDID",
+      "group": "Cluster commands",
+      "url": "https://redis.io/commands/cluster-myshardid/",
+      "syntax": "CLUSTER MYSHARDID",
+      "description": "Returns the shard ID of a node.",
+      "since": "7.2.0"
+    },
+    {
+      "name": "CLUSTER NODES",
+      "group": "Cluster commands",
+      "url": "https://redis.io/commands/cluster-nodes/",
+      "syntax": "CLUSTER NODES",
+      "description": "Returns the cluster configuration for a node.",
+      "since": "3.0.0"
+    },
+    {
+      "name": "CLUSTER REPLICAS",
+      "group": "Cluster commands",
+      "url": "https://redis.io/commands/cluster-replicas/",
+      "syntax": "CLUSTER REPLICAS node-id",
+      "description": "Lists the replica nodes of a master node.",
+      "since": "5.0.0"
+    },
+    {
+      "name": "CLUSTER REPLICATE",
+      "group": "Cluster commands",
+      "url": "https://redis.io/commands/cluster-replicate/",
+      "syntax": "CLUSTER REPLICATE node-id",
+      "description": "Configure a node as replica of a master node.",
+      "since": "3.0.0"
+    },
+    {
+      "name": "CLUSTER RESET",
+      "group": "Cluster commands",
+      "url": "https://redis.io/commands/cluster-reset/",
+      "syntax": "CLUSTER RESET [HARD | SOFT]",
+      "description": "Resets a node.",
+      "since": "3.0.0"
+    },
+    {
+      "name": "CLUSTER SAVECONFIG",
+      "group": "Cluster commands",
+      "url": "https://redis.io/commands/cluster-saveconfig/",
+      "syntax": "CLUSTER SAVECONFIG",
+      "description": "Forces a node to save the cluster configuration to disk.",
+      "since": "3.0.0"
+    },
+    {
+      "name": "CLUSTER SET-CONFIG-EPOCH",
+      "group": "Cluster commands",
+      "url": "https://redis.io/commands/cluster-set-config-epoch/",
+      "syntax": "CLUSTER SET-CONFIG-EPOCH config-epoch",
+      "description": "Sets the configuration epoch for a new node.",
+      "since": "3.0.0"
+    },
+    {
+      "name": "CLUSTER SETSLOT",
+      "group": "Cluster commands",
+      "url": "https://redis.io/commands/cluster-setslot/",
+      "syntax": "CLUSTER SETSLOT slot <IMPORTING node-id | MIGRATING node-id |\n  NODE node-id | STABLE>",
+      "description": "Binds a hash slot to a node.",
+      "since": "3.0.0"
+    },
+    {
+      "name": "CLUSTER SHARDS",
+      "group": "Cluster commands",
+      "url": "https://redis.io/commands/cluster-shards/",
+      "syntax": "CLUSTER SHARDS",
+      "description": "Returns the mapping of cluster slots to shards.",
+      "since": "7.0.0"
+    },
+    {
+      "name": "CLUSTER SLAVES",
+      "group": "Cluster commands",
+      "url": "https://redis.io/commands/cluster-slaves/",
+      "syntax": "CLUSTER SLAVES node-id",
+      "description": "Lists the replica nodes of a master node.",
+      "since": "3.0.0"
+    },
+    {
+      "name": "CLUSTER SLOT-STATS",
+      "group": "Cluster commands",
+      "url": "https://redis.io/commands/cluster-slot-stats/",
+      "syntax": "CLUSTER SLOT-STATS <SLOTSRANGE start-slot end-slot | ORDERBY metric\n  [LIMIT limit] [ASC | DESC]>",
+      "description": "Return an array of slot usage statistics for slots assigned to the current node.",
+      "since": "8.2.0"
+    },
+    {
+      "name": "CLUSTER SLOTS",
+      "group": "Cluster commands",
+      "url": "https://redis.io/commands/cluster-slots/",
+      "syntax": "CLUSTER SLOTS",
+      "description": "Returns the mapping of cluster slots to nodes.",
+      "since": "3.0.0"
+    },
+    {
+      "name": "READONLY",
+      "group": "Cluster commands",
+      "url": "https://redis.io/commands/readonly/",
+      "syntax": "READONLY",
+      "description": "Enables read-only queries for a connection to a Redis Cluster replica node.",
+      "since": "3.0.0"
+    },
+    {
+      "name": "READWRITE",
+      "group": "Cluster commands",
+      "url": "https://redis.io/commands/readwrite/",
+      "syntax": "READWRITE",
+      "description": "Enables read-write queries for a connection to a Reids Cluster replica node.",
+      "since": "3.0.0"
+    },
+    {
+      "name": "COPY",
+      "group": "Generic commands",
+      "url": "https://redis.io/commands/copy/",
+      "syntax": "COPY source destination [DB destination-db] [REPLACE]",
+      "description": "Copies the value of a key to a new key.",
+      "since": "6.2.0"
+    },
+    {
+      "name": "DEL",
+      "group": "Generic commands",
+      "url": "https://redis.io/commands/del/",
+      "syntax": "DEL key [key ...]",
+      "description": "Deletes one or more keys.",
+      "since": "1.0.0"
+    },
+    {
+      "name": "DUMP",
+      "group": "Generic commands",
+      "url": "https://redis.io/commands/dump/",
+      "syntax": "DUMP key",
+      "description": "Returns a serialized representation of the value stored at a key.",
+      "since": "2.6.0"
+    },
+    {
+      "name": "EXISTS",
+      "group": "Generic commands",
+      "url": "https://redis.io/commands/exists/",
+      "syntax": "EXISTS key [key ...]",
+      "description": "Determines whether one or more keys exist.",
+      "since": "1.0.0"
+    },
+    {
+      "name": "EXPIRE",
+      "group": "Generic commands",
+      "url": "https://redis.io/commands/expire/",
+      "syntax": "EXPIRE key seconds [NX | XX | GT | LT]",
+      "description": "Sets the expiration time of a key in seconds.",
+      "since": "1.0.0"
+    },
+    {
+      "name": "EXPIREAT",
+      "group": "Generic commands",
+      "url": "https://redis.io/commands/expireat/",
+      "syntax": "EXPIREAT key unix-time-seconds [NX | XX | GT | LT]",
+      "description": "Sets the expiration time of a key to a Unix timestamp.",
+      "since": "1.2.0"
+    },
+    {
+      "name": "EXPIRETIME",
+      "group": "Generic commands",
+      "url": "https://redis.io/commands/expiretime/",
+      "syntax": "EXPIRETIME key",
+      "description": "Returns the expiration time of a key as a Unix timestamp.",
+      "since": "7.0.0"
+    },
+    {
+      "name": "KEYS",
+      "group": "Generic commands",
+      "url": "https://redis.io/commands/keys/",
+      "syntax": "KEYS pattern",
+      "description": "Returns all key names that match a pattern.",
+      "since": "1.0.0"
+    },
+    {
+      "name": "MIGRATE",
+      "group": "Generic commands",
+      "url": "https://redis.io/commands/migrate/",
+      "syntax": "MIGRATE host port <key | \"\"> destination-db timeout [COPY] [REPLACE]\n  [AUTH password | AUTH2 username password] [KEYS key [key ...]]",
+      "description": "Atomically transfers a key from one Redis instance to another.",
+      "since": "2.6.0"
+    },
+    {
+      "name": "MOVE",
+      "group": "Generic commands",
+      "url": "https://redis.io/commands/move/",
+      "syntax": "MOVE key db",
+      "description": "Moves a key to another database.",
+      "since": "1.0.0"
+    },
+    {
+      "name": "OBJECT ENCODING",
+      "group": "Generic commands",
+      "url": "https://redis.io/commands/object-encoding/",
+      "syntax": "OBJECT ENCODING key",
+      "description": "Returns the internal encoding of a Redis object.",
+      "since": "2.2.3"
+    },
+    {
+      "name": "OBJECT FREQ",
+      "group": "Generic commands",
+      "url": "https://redis.io/commands/object-freq/",
+      "syntax": "OBJECT FREQ key",
+      "description": "Returns the logarithmic access frequency counter of a Redis object.",
+      "since": "4.0.0"
+    },
+    {
+      "name": "OBJECT IDLETIME",
+      "group": "Generic commands",
+      "url": "https://redis.io/commands/object-idletime/",
+      "syntax": "OBJECT IDLETIME key",
+      "description": "Returns the time since the last access to a Redis object.",
+      "since": "2.2.3"
+    },
+    {
+      "name": "OBJECT REFCOUNT",
+      "group": "Generic commands",
+      "url": "https://redis.io/commands/object-refcount/",
+      "syntax": "OBJECT REFCOUNT key",
+      "description": "Returns the reference count of a value of a key.",
+      "since": "2.2.3"
+    },
+    {
+      "name": "PERSIST",
+      "group": "Generic commands",
+      "url": "https://redis.io/commands/persist/",
+      "syntax": "PERSIST key",
+      "description": "Removes the expiration time of a key.",
+      "since": "2.2.0"
+    },
+    {
+      "name": "PEXPIRE",
+      "group": "Generic commands",
+      "url": "https://redis.io/commands/pexpire/",
+      "syntax": "PEXPIRE key milliseconds [NX | XX | GT | LT]",
+      "description": "Sets the expiration time of a key in milliseconds.",
+      "since": "2.6.0"
+    },
+    {
+      "name": "PEXPIREAT",
+      "group": "Generic commands",
+      "url": "https://redis.io/commands/pexpireat/",
+      "syntax": "PEXPIREAT key unix-time-milliseconds [NX | XX | GT | LT]",
+      "description": "Sets the expiration time of a key to a Unix milliseconds timestamp.",
+      "since": "2.6.0"
+    },
+    {
+      "name": "PEXPIRETIME",
+      "group": "Generic commands",
+      "url": "https://redis.io/commands/pexpiretime/",
+      "syntax": "PEXPIRETIME key",
+      "description": "Returns the expiration time of a key as a Unix milliseconds timestamp.",
+      "since": "7.0.0"
+    },
+    {
+      "name": "PTTL",
+      "group": "Generic commands",
+      "url": "https://redis.io/commands/pttl/",
+      "syntax": "PTTL key",
+      "description": "Returns the expiration time in milliseconds of a key.",
+      "since": "2.6.0"
+    },
+    {
+      "name": "RANDOMKEY",
+      "group": "Generic commands",
+      "url": "https://redis.io/commands/randomkey/",
+      "syntax": "RANDOMKEY",
+      "description": "Returns a random key name from the database.",
+      "since": "1.0.0"
+    },
+    {
+      "name": "RENAME",
+      "group": "Generic commands",
+      "url": "https://redis.io/commands/rename/",
+      "syntax": "RENAME key newkey",
+      "description": "Renames a key and overwrites the destination.",
+      "since": "1.0.0"
+    },
+    {
+      "name": "RENAMENX",
+      "group": "Generic commands",
+      "url": "https://redis.io/commands/renamenx/",
+      "syntax": "RENAMENX key newkey",
+      "description": "Renames a key only when the target key name doesn't exist.",
+      "since": "1.0.0"
+    },
+    {
+      "name": "RESTORE",
+      "group": "Generic commands",
+      "url": "https://redis.io/commands/restore/",
+      "syntax": "RESTORE key ttl serialized-value [REPLACE] [ABSTTL]\n  [IDLETIME seconds] [FREQ frequency]",
+      "description": "Creates a key from the serialized representation of a value.",
+      "since": "2.6.0"
+    },
+    {
+      "name": "SCAN",
+      "group": "Generic commands",
+      "url": "https://redis.io/commands/scan/",
+      "syntax": "SCAN cursor [MATCH pattern] [COUNT count] [TYPE type]",
+      "description": "Iterates over the key names in the database.",
+      "since": "2.8.0"
+    },
+    {
+      "name": "SORT",
+      "group": "Generic commands",
+      "url": "https://redis.io/commands/sort/",
+      "syntax": "SORT key [BY pattern] [LIMIT offset count] [GET pattern [GET pattern\n  ...]] [ASC | DESC] [ALPHA] [STORE destination]",
+      "description": "Sorts the elements in a list, a set, or a sorted set, optionally storing the result.",
+      "since": "1.0.0"
+    },
+    {
+      "name": "SORT_RO",
+      "group": "Generic commands",
+      "url": "https://redis.io/commands/sort_ro/",
+      "syntax": "SORT RO key [BY pattern] [LIMIT offset count] [GET pattern [GET\n  pattern ...]] [ASC | DESC] [ALPHA]",
+      "description": "Returns the sorted elements of a list, a set, or a sorted set.",
+      "since": "7.0.0"
+    },
+    {
+      "name": "TOUCH",
+      "group": "Generic commands",
+      "url": "https://redis.io/commands/touch/",
+      "syntax": "TOUCH key [key ...]",
+      "description": "Returns the number of existing keys out of those specified after updating the time they were last accessed.",
+      "since": "3.2.1"
+    },
+    {
+      "name": "TTL",
+      "group": "Generic commands",
+      "url": "https://redis.io/commands/ttl/",
+      "syntax": "TTL key",
+      "description": "Returns the expiration time in seconds of a key.",
+      "since": "1.0.0"
+    },
+    {
+      "name": "TYPE",
+      "group": "Generic commands",
+      "url": "https://redis.io/commands/type/",
+      "syntax": "TYPE key",
+      "description": "Determines the type of value stored at a key.",
+      "since": "1.0.0"
+    },
+    {
+      "name": "UNLINK",
+      "group": "Generic commands",
+      "url": "https://redis.io/commands/unlink/",
+      "syntax": "UNLINK key [key ...]",
+      "description": "Asynchronously deletes one or more keys.",
+      "since": "4.0.0"
+    },
+    {
+      "name": "WAIT",
+      "group": "Generic commands",
+      "url": "https://redis.io/commands/wait/",
+      "syntax": "WAIT numreplicas timeout",
+      "description": "Blocks until the asynchronous replication of all preceding write commands sent by the connection is completed.",
+      "since": "3.0.0"
+    },
+    {
+      "name": "WAITAOF",
+      "group": "Generic commands",
+      "url": "https://redis.io/commands/waitaof/",
+      "syntax": "WAITAOF numlocal numreplicas timeout",
+      "description": "Blocks until all of the preceding write commands sent by the connection are written to the append-only file of the master and/or replicas.",
+      "since": "7.2.0"
+    }
+  ]
+}

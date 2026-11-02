@@ -1,0 +1,9 @@
+---
+import DefaultFooter from '@astrojs/starlight/components/Footer.astro';
+import { docsLink } from '../lib/links';
+---
+<DefaultFooter {...Astro.props} />
+<div class="ffkv-footer" data-pagefind-ignore>
+  <a href={docsLink('')}>ffkv <span>freaking fast KV</span></a>
+  <div><a href={docsLink('concepts/compatibility/')}>Compatibility contracts</a><span aria-hidden="true">/</span><a href={docsLink('contributing/testing/')}>Behavioral verification</a></div>
+</div>

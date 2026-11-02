@@ -1,0 +1,160 @@
+{{- $secret := required "existingSecret must name an externally provisioned Secret" .Values.existingSecret -}}
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "ffkv.name" . }}
+  labels:
+    {{- include "ffkv.labels" . | nindent 4 }}
+spec:
+  serviceName: {{ include "ffkv.name" . }}-headless
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "ffkv.labels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "ffkv.labels" . | nindent 8 }}
+    spec:
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: {{ .Values.terminationGracePeriodSeconds }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile:
+          type: RuntimeDefault
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      initContainers:
+        - name: private-secret-files
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: [python3, /usr/local/bin/ffkv-install-secrets]
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+          resources:
+            requests: {cpu: 10m, memory: 16Mi}
+            limits: {cpu: 100m, memory: 64Mi}
+          volumeMounts:
+            - {name: projected-secrets, mountPath: /projected, readOnly: true}
+            - {name: private-secrets, mountPath: /runtime}
+      containers:
+        - name: ffkv
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args:
+            - --bind
+            - 0.0.0.0:6379
+            - --data-dir
+            - /var/lib/ffkv/data
+            - --durability
+            - {{ .Values.durability | quote }}
+            - --storage
+            - {{ .Values.storage | quote }}
+            - --shards
+            - {{ .Values.shards | int64 | quote }}
+            - --max-connections
+            - {{ .Values.maxConnections | int64 | quote }}
+            - --inline-threshold
+            - {{ .Values.inlineThreshold | int64 | quote }}
+            - --cache-bytes
+            - {{ .Values.cacheBytes | int64 | quote }}
+            - --segment-bytes
+            - {{ .Values.segmentBytes | int64 | quote }}
+            - --disk-budget
+            - {{ .Values.diskBudget | int64 | quote }}
+            - --max-rss-bytes
+            - {{ .Values.maxRssBytes | int64 | quote }}
+            - --acl-file
+            - /run/ffkv/config/users.acl
+            - --tls-cert
+            - /run/ffkv/config/tls.crt
+            - --tls-key
+            - /run/ffkv/config/tls.key
+            - --management-bind
+            - 0.0.0.0:8080
+            - --management-token-file
+            - /run/ffkv/config/management-tokens.json
+            - --management-audit-file
+            - /var/lib/ffkv/management-audit.jsonl
+            - --management-tls-cert
+            - /run/ffkv/config/tls.crt
+            - --management-tls-key
+            - /run/ffkv/config/tls.key
+            - --console-dir
+            - /opt/ffkv/console
+          ports:
+            - {name: resp-tls, containerPort: 6379}
+            - {name: management-tls, containerPort: 8080}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          startupProbe:
+            {{- include "ffkv.probe" . | nindent 12 }}
+            failureThreshold: 30
+          readinessProbe:
+            {{- include "ffkv.probe" . | nindent 12 }}
+            failureThreshold: 3
+          livenessProbe:
+            {{- include "ffkv.probe" . | nindent 12 }}
+            failureThreshold: 6
+          volumeMounts:
+            - {name: data, mountPath: /var/lib/ffkv}
+            - {name: private-secrets, mountPath: /run/ffkv, readOnly: true}
+            - {name: temporary, mountPath: /tmp}
+      volumes:
+        - name: projected-secrets
+          secret:
+            secretName: {{ $secret | quote }}
+            defaultMode: 0440
+            items:
+              - {key: users.acl, path: users.acl}
+              - {key: management-tokens.json, path: management-tokens.json}
+              - {key: health-password, path: health-password}
+              - {key: tls.crt, path: tls.crt}
+              - {key: tls.key, path: tls.key}
+              - {key: ca.crt, path: ca.crt}
+        - name: private-secrets
+          emptyDir: {medium: Memory, sizeLimit: 1Mi}
+        - name: temporary
+          emptyDir: {medium: Memory, sizeLimit: 16Mi}
+        {{- if .Values.persistence.existingClaim }}
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ .Values.persistence.existingClaim | quote }}
+        {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+  {{- if not .Values.persistence.existingClaim }}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: [ReadWriteOnce]
+        {{- if ne .Values.persistence.storageClass nil }}
+        storageClassName: {{ .Values.persistence.storageClass | quote }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.persistence.size | quote }}
+  {{- end }}

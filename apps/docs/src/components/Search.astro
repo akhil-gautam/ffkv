@@ -1,0 +1,189 @@
+---
+import { Icon } from '@astrojs/starlight/components';
+import { docsLink } from '../lib/links';
+const label = Astro.locals.t('search.label');
+---
+<ffkv-docs-search class={Astro.props.class} data-base={import.meta.env.BASE_URL} data-development={String(import.meta.env.DEV)} data-dev-message={Astro.locals.t('search.devWarning')}>
+  <button class="search-trigger" data-search-open disabled aria-label={label} aria-keyshortcuts="Control+K">
+    <Icon name="magnifier" size="1rem" />
+    <span class="trigger-label">{label}</span>
+    <kbd><span data-shortcut-modifier>Ctrl</span> K</kbd>
+  </button>
+  <noscript><a href={docsLink('reference/commands/')}>Browse commands</a></noscript>
+  <dialog aria-label={label}>
+    <div class="search-frame">
+      <div class="search-heading"><strong>{label}</strong><button type="button" data-search-close aria-label="Close search"><Icon name="close" size="1rem" /><span>Esc</span></button></div>
+      <form role="search" aria-label="Search documentation">
+        <label class="sr-only" for="ffkv-docs-query">Search guides and commands</label>
+        <input id="ffkv-docs-query" name="query" type="search" placeholder="Search guides, commands, and concepts…" autocomplete="off" spellcheck="false" aria-controls="ffkv-search-results" />
+      </form>
+      <p class="search-status" role="status" aria-live="polite" data-search-status>Search the complete handbook, locally.</p>
+      <ul id="ffkv-search-results" aria-label="Search results"></ul>
+      <div class="search-footer"><span>↑ ↓ to navigate · Enter to open</span><a href={docsLink('reference/commands/')}>Browse all commands →</a></div>
+    </div>
+  </dialog>
+</ffkv-docs-search>
+<script>
+  type SearchHit = { data: () => Promise<{ url: string; meta: { title: string }; excerpt: string }> };
+  type SearchIndex = { search: (query: string) => Promise<{ results: SearchHit[] }> };
+  class DocumentationSearch extends HTMLElement {
+    connectedCallback() {
+      if (this.dataset.initialized) return;
+      this.dataset.initialized = 'true';
+      const openButton = this.querySelector<HTMLButtonElement>('[data-search-open]')!;
+      const closeButton = this.querySelector<HTMLButtonElement>('[data-search-close]')!;
+      const dialog = this.querySelector<HTMLDialogElement>('dialog')!;
+      const input = this.querySelector<HTMLInputElement>('input')!;
+      const form = this.querySelector<HTMLFormElement>('form')!;
+      const status = this.querySelector<HTMLElement>('[data-search-status]')!;
+      const list = this.querySelector<HTMLUListElement>('ul')!;
+      const base = this.dataset.base!;
+      const development = this.dataset.development === 'true';
+      let pending: Promise<SearchIndex> | undefined;
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      let sequence = 0;
+      if (/(Mac|iPhone|iPad|iPod)/i.test(navigator.userAgent)) {
+        this.querySelector('[data-shortcut-modifier]')!.textContent = '⌘';
+        openButton.setAttribute('aria-keyshortcuts', 'Meta+K');
+      }
+      const loadIndex = () => pending ??= (async () => {
+        const bundle = new URL(`${base}pagefind/pagefind.js`, window.location.origin).href;
+        const pagefind = await import(/* @vite-ignore */ bundle);
+        // Pagefind 1.5.2 strips the origin before passing URLs to its blob worker.
+        // Its documented main-thread mode retains real search and resolves the
+        // same relative assets correctly at both root and project subpaths.
+        return pagefind.createInstance({
+          basePath: new URL(`${base}pagefind/`, window.location.origin).href,
+          baseUrl: base,
+          noWorker: true,
+        }) as SearchIndex;
+      })();
+      const search = async () => {
+        const current = ++sequence;
+        const query = input.value.trim();
+        list.replaceChildren();
+        if (development) {
+          status.textContent = this.dataset.devMessage!;
+          return;
+        }
+        if (!query) {
+          status.textContent = 'Search the complete handbook, locally.';
+          return;
+        }
+        status.textContent = 'Searching…';
+        try {
+          const index = await loadIndex();
+          const response = await index.search(query);
+          const hits = await Promise.all(response.results.slice(0, 12).map((hit) => hit.data()));
+          if (current !== sequence) return;
+          status.textContent = response.results.length === 0
+            ? `No pages match “${query}”. Try a shorter command or another term.`
+            : `${hits.length} of ${response.results.length} matching ${response.results.length === 1 ? 'page' : 'pages'}`;
+          const fragment = document.createDocumentFragment();
+          for (const hit of hits) {
+            const item = document.createElement('li');
+            const anchor = document.createElement('a');
+            const title = document.createElement('strong');
+            const excerpt = document.createElement('span');
+            anchor.href = hit.url;
+            title.textContent = hit.meta.title;
+            // Pagefind excerpts contain highlighting HTML. Treat it as text,
+            // never inject indexed content into the live document with innerHTML.
+            excerpt.textContent = new DOMParser().parseFromString(hit.excerpt, 'text/html').body.textContent;
+            anchor.append(title, excerpt);
+            item.append(anchor);
+            fragment.append(item);
+          }
+          list.replaceChildren(fragment);
+        } catch (error) {
+          if (current !== sequence) return;
+          pending = undefined;
+          status.textContent = 'Search could not load. Check your connection or use the command browser below.';
+          console.error('ffkv documentation search:', error);
+        }
+      };
+      const open = () => {
+        if (dialog.open) return;
+        dialog.showModal();
+        document.body.setAttribute('data-search-modal-open', '');
+        input.focus();
+        input.select();
+        if (development) status.textContent = this.dataset.devMessage!;
+        else if (input.value.trim()) void search();
+      };
+      openButton.disabled = false;
+      openButton.addEventListener('click', open);
+      closeButton.addEventListener('click', () => dialog.close());
+      dialog.addEventListener('click', (event) => { if (event.target === dialog) dialog.close(); });
+      dialog.addEventListener('close', () => {
+        ++sequence;
+        clearTimeout(timer);
+        document.body.removeAttribute('data-search-modal-open');
+        openButton.focus();
+      });
+      window.addEventListener('keydown', (event) => {
+        if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
+          event.preventDefault();
+          if (dialog.open) dialog.close(); else open();
+        }
+      });
+      input.addEventListener('input', () => {
+        ++sequence;
+        clearTimeout(timer);
+        list.replaceChildren();
+        timer = setTimeout(search, 140);
+      });
+      form.addEventListener('submit', (event) => {
+        event.preventDefault();
+        list.querySelector<HTMLAnchorElement>('a')?.click();
+      });
+      dialog.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape') {
+          event.preventDefault();
+          dialog.close();
+          return;
+        }
+        if (!['ArrowDown', 'ArrowUp'].includes(event.key)) return;
+        const links = [...list.querySelectorAll<HTMLAnchorElement>('a')];
+        if (!links.length) return;
+        const index = links.indexOf(document.activeElement as HTMLAnchorElement);
+        const next = event.key === 'ArrowDown' ? Math.min(index + 1, links.length - 1) : Math.max(index - 1, 0);
+        links[next].focus();
+        event.preventDefault();
+      });
+    }
+  }
+  if (!customElements.get('ffkv-docs-search')) customElements.define('ffkv-docs-search', DocumentationSearch);
+</script>
+<style>
+  ffkv-docs-search { display: contents; }
+  .search-trigger { display: flex; align-items: center; gap: .65rem; min-height: 42px; width: min(100%, 24rem); padding: .55rem .8rem; background: var(--docs-surface); color: var(--docs-muted); border: 1px solid var(--docs-line); border-radius: .45rem; cursor: pointer; font-size: .8rem; }
+  .search-trigger:hover { border-color: var(--docs-faint); color: var(--docs-ink); }
+  .search-trigger:disabled { cursor: default; opacity: .6; }
+  .search-trigger kbd { margin-inline-start: auto; padding: .1rem .3rem; border: 1px solid var(--docs-line); border-radius: .25rem; font-size: .65rem; white-space: nowrap; }
+  dialog { width: min(46rem, calc(100vw - 2rem)); max-height: min(82dvh, 48rem); margin: 8dvh auto; padding: 0; border: 1px solid var(--docs-line); border-radius: .8rem; background: var(--sl-color-bg); color: var(--docs-ink); box-shadow: 0 16px 80px #0005; }
+  dialog::backdrop { background: #0009; backdrop-filter: blur(3px); }
+  .search-frame { padding: 1.25rem; }
+  .search-heading { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin-bottom: .8rem; font-size: .85rem; }
+  .search-heading button { display: flex; align-items: center; gap: .4rem; min-height: 40px; min-width: 44px; border: 0; border-radius: .3rem; padding: .4rem; color: var(--docs-muted); background: transparent; cursor: pointer; }
+  .search-heading button:hover { background: var(--docs-surface-raised); }
+  .search-heading button span { font-size: .65rem; }
+  input { width: 100%; min-height: 48px; border: 1px solid var(--docs-line); border-radius: .45rem; background: var(--docs-surface); color: var(--docs-ink); padding: .8rem; font: inherit; font-size: 1rem; }
+  .search-status { color: var(--docs-muted); font-size: .78rem; line-height: 1.7; padding-block: .8rem; }
+  ul { list-style: none; margin: 0; padding: 0; }
+  #ffkv-search-results :global(li + li) { border-top: 1px solid var(--docs-line); }
+  #ffkv-search-results :global(a) { display: grid; gap: .35rem; padding: .85rem .7rem; border-radius: .35rem; color: var(--docs-ink); text-decoration: none; }
+  #ffkv-search-results :global(a:hover), #ffkv-search-results :global(a:focus-visible) { background: var(--docs-surface-raised); }
+  #ffkv-search-results :global(strong) { color: var(--docs-lime); font-size: .9rem; }
+  #ffkv-search-results :global(span) { color: var(--docs-muted); font-size: .78rem; line-height: 1.7; }
+  .search-footer { display: flex; justify-content: space-between; gap: 1rem; flex-wrap: wrap; border-top: 1px solid var(--docs-line); margin-top: .8rem; padding-top: .85rem; color: var(--docs-faint); font-size: .68rem; }
+  .search-footer a { color: var(--docs-lime); }
+  .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+  :global(body[data-search-modal-open]) { overflow: hidden; }
+  @media (max-width: 49.99rem) {
+    .search-trigger { width: 44px; padding: .65rem; justify-content: center; background: transparent; border-color: transparent; }
+    .trigger-label, .search-trigger kbd { display: none; }
+    dialog { margin-top: 1rem; max-height: calc(100dvh - 2rem); }
+    .search-frame { padding: 1rem; }
+  }
+</style>

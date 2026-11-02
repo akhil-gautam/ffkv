@@ -1,0 +1,55 @@
+name: Documentation
+
+on:
+  push:
+    paths:
+      - 'apps/docs/**'
+      - 'src/**'
+      - 'tests/bdd/features/**'
+      - '.github/workflows/docs.yml'
+  pull_request:
+    paths:
+      - 'apps/docs/**'
+      - 'src/**'
+      - 'tests/bdd/features/**'
+      - '.github/workflows/docs.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: docs-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Static docs (${{ matrix.name }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: root
+            base: /
+          - name: project
+            base: /ffkv/
+    env:
+      DOCS_BASE: ${{ matrix.base }}
+      ASTRO_TELEMETRY_DISABLED: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: apps/docs/package-lock.json
+      - run: npm --prefix apps/docs ci --no-audit --no-fund
+      - run: npm --prefix apps/docs run check
+      - run: npm --prefix apps/docs run build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ffkv-docs-${{ matrix.name }}
+          path: apps/docs/dist
+          if-no-files-found: error
+          retention-days: 7

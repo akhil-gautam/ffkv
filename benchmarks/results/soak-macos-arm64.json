@@ -1,0 +1,514 @@
+{
+  "binary_version": {
+    "command": [
+      "target/release/ffkv",
+      "--version"
+    ],
+    "exit_code": 0,
+    "stderr": "",
+    "stdout": "ffkv 0.1.0"
+  },
+  "environment": {
+    "client": "stdlib RESP2 runtime.py",
+    "cpu_count": 10,
+    "machine": "arm64",
+    "os": "macOS-27.0.1-arm64-arm-64bit",
+    "python": "3.12.10"
+  },
+  "errors": [],
+  "evidence_scope": "observed finite run only; no seven-day, power-loss, HA, or Redis exactly-once claim",
+  "invocation": [
+    "tests/soak_smoke.py",
+    "--binary",
+    "target/release/ffkv",
+    "--duration",
+    "15",
+    "--json",
+    "/var/folders/s7/pv15tmjx3rlg0_s43vb4bbsc0000gn/T/ffkv-final-xuverikm/soak-release-final.json"
+  ],
+  "ok": true,
+  "runs": [
+    {
+      "command_line": [
+        "/Users/akhilgautam/projects/personal/ffkv/target/release/ffkv",
+        "--bind",
+        "127.0.0.1:0",
+        "--storage",
+        "memory",
+        "--data-dir",
+        "/var/folders/s7/pv15tmjx3rlg0_s43vb4bbsc0000gn/T/ffkv-soak-v3ki9a97/memory/data",
+        "--durability",
+        "strict",
+        "--inline-threshold",
+        "1024",
+        "--cache-bytes",
+        "32768",
+        "--segment-bytes",
+        "1048576",
+        "--shards",
+        "4"
+      ],
+      "counters": {
+        "backups": 1,
+        "checkpoints": 12,
+        "commands_attempted": 6840,
+        "commands_completed": 5243,
+        "concurrent_tuple_reads": 1824,
+        "cycles_completed": 369,
+        "dead_redrives": 45,
+        "dead_state_checks": 45,
+        "forced_process_crashes": 4,
+        "list_recovery_checks": 20,
+        "native_idempotent_retries": 376,
+        "native_recovery_idempotent_retries": 7,
+        "recovery_checks": 20,
+        "restored_worker_checks": 4,
+        "scheduled_cancellations": 45,
+        "scheduled_state_checks": 45,
+        "stale_receipts_rejected": 1581,
+        "unknown_observer_connections": 4,
+        "unknown_outcome_connections": 16
+      },
+      "durability": "strict",
+      "errors": [],
+      "memory_bound": {
+        "list_items_per_worker": 16,
+        "live_native_jobs_per_worker": 1,
+        "rss_report_samples_max": 2048,
+        "terminal_metadata": "queue deleted after each terminal idempotency check",
+        "workers": 4
+      },
+      "observed_active_workload_seconds": 15.010040458990261,
+      "observed_total_seconds": 15.420075082918629,
+      "ok": true,
+      "requested_workload_seconds": 15.0,
+      "restore": {
+        "command": [
+          "/Users/akhilgautam/projects/personal/ffkv/target/release/ffkv",
+          "restore",
+          "--source",
+          "/var/folders/s7/pv15tmjx3rlg0_s43vb4bbsc0000gn/T/ffkv-soak-v3ki9a97/memory/data/backups/soak-final",
+          "--data-dir",
+          "/var/folders/s7/pv15tmjx3rlg0_s43vb4bbsc0000gn/T/ffkv-soak-v3ki9a97/memory/restored"
+        ],
+        "exit_code": 0,
+        "status": "verified_real_process_reopen",
+        "stderr": "",
+        "stdout": "{\"data_frames\":4,\"sha256\":\"81eea0a9adda4160e4ad294c30914894a3a1882ea466e61afde7f851b453aff1\",\"wal_bytes\":263140}\n"
+      },
+      "rss_sample_count": 21,
+      "rss_samples": [
+        {
+          "bytes": 9682944,
+          "elapsed_seconds": 0.05908795795403421,
+          "phase": "idle",
+          "pid": 81965,
+          "source": "ps current RSS KiB"
+        },
+        {
+          "bytes": 9961472,
+          "elapsed_seconds": 0.06691129179671407,
+          "phase": "concurrent_maintenance",
+          "pid": 81965,
+          "source": "ps current RSS KiB"
+        },
+        {
+          "bytes": 11239424,
+          "elapsed_seconds": 1.1126088749151677,
+          "phase": "concurrent_maintenance",
+          "pid": 81965,
+          "source": "ps current RSS KiB"
+        },
+        {
+          "bytes": 11927552,
+          "elapsed_seconds": 2.1436882079578936,
+          "phase": "concurrent_maintenance",
+          "pid": 81965,
+          "source": "ps current RSS KiB"
+        },
+        {
+          "bytes": 12255232,
+          "elapsed_seconds": 3.185053874971345,
+          "phase": "concurrent_maintenance",
+          "pid": 81965,
+          "source": "ps current RSS KiB"
+        },
+        {
+          "bytes": 10698752,
+          "elapsed_seconds": 4.1408421248197556,
+          "phase": "recovered",
+          "pid": 81996,
+          "source": "ps current RSS KiB"
+        },
+        {
+          "bytes": 10797056,
+          "elapsed_seconds": 4.149421707959846,
+          "phase": "concurrent_maintenance",
+          "pid": 81996,
+          "source": "ps current RSS KiB"
+        },
+        {
+          "bytes": 11862016,
+          "elapsed_seconds": 5.213205291889608,
+          "phase": "concurrent_maintenance",
+          "pid": 81996,
+          "source": "ps current RSS KiB"
+        },
+        {
+          "bytes": 12468224,
+          "elapsed_seconds": 6.237942541949451,
+          "phase": "concurrent_maintenance",
+          "pid": 81996,
+          "source": "ps current RSS KiB"
+        },
+        {
+          "bytes": 12615680,
+          "elapsed_seconds": 7.251037624897435,
+          "phase": "concurrent_maintenance",
+          "pid": 81996,
+          "source": "ps current RSS KiB"
+        },
+        {
+          "bytes": 10616832,
+          "elapsed_seconds": 8.209043666953221,
+          "phase": "recovered",
+          "pid": 82020,
+          "source": "ps current RSS KiB"
+        },
+        {
+          "bytes": 10731520,
+          "elapsed_seconds": 8.216635499848053,
+          "phase": "concurrent_maintenance",
+          "pid": 82020,
+          "source": "ps current RSS KiB"
+        },
+        {
+          "bytes": 11927552,
+          "elapsed_seconds": 9.253962707938626,
+          "phase": "concurrent_maintenance",
+          "pid": 82020,
+          "source": "ps current RSS KiB"
+        },
+        {
+          "bytes": 12353536,
+          "elapsed_seconds": 10.268941124901175,
+          "phase": "concurrent_maintenance",
+          "pid": 82020,
+          "source": "ps current RSS KiB"
+        },
+        {
+          "bytes": 12582912,
+          "elapsed_seconds": 11.333212541881949,
+          "phase": "concurrent_maintenance",
+          "pid": 82020,
+          "source": "ps current RSS KiB"
+        },
+        {
+          "bytes": 10665984,
+          "elapsed_seconds": 12.277007791912183,
+          "phase": "recovered",
+          "pid": 82047,
+          "source": "ps current RSS KiB"
+        },
+        {
+          "bytes": 10764288,
+          "elapsed_seconds": 12.284819207852706,
+          "phase": "concurrent_maintenance",
+          "pid": 82047,
+          "source": "ps current RSS KiB"
+        },
+        {
+          "bytes": 11960320,
+          "elapsed_seconds": 13.298716749995947,
+          "phase": "concurrent_maintenance",
+          "pid": 82047,
+          "source": "ps current RSS KiB"
+        },
+        {
+          "bytes": 12337152,
+          "elapsed_seconds": 14.351663624867797,
+          "phase": "concurrent_maintenance",
+          "pid": 82047,
+          "source": "ps current RSS KiB"
+        },
+        {
+          "bytes": 10698752,
+          "elapsed_seconds": 15.33163887495175,
+          "phase": "recovered",
+          "pid": 82070,
+          "source": "ps current RSS KiB"
+        },
+        {
+          "bytes": 11632640,
+          "elapsed_seconds": 15.412787166889757,
+          "phase": "final",
+          "pid": 82070,
+          "source": "ps current RSS KiB"
+        }
+      ],
+      "rss_summary": {
+        "first_bytes": 9682944,
+        "growth_bytes": 1949696,
+        "last_bytes": 11632640,
+        "maximum_sampled_current_bytes": 12615680,
+        "note": "current RSS samples across PID generations; not allocator or cache size"
+      },
+      "storage": "memory",
+      "unknown_outcome_policy": "one pending list transition allows pre/post state, never retries remove-on-pop; native enqueue retries use persisted idempotency token",
+      "workload_and_recovery_seconds": 15.271150208078325
+    },
+    {
+      "command_line": [
+        "/Users/akhilgautam/projects/personal/ffkv/target/release/ffkv",
+        "--bind",
+        "127.0.0.1:0",
+        "--storage",
+        "hybrid",
+        "--data-dir",
+        "/var/folders/s7/pv15tmjx3rlg0_s43vb4bbsc0000gn/T/ffkv-soak-v3ki9a97/hybrid/data",
+        "--durability",
+        "strict",
+        "--inline-threshold",
+        "1024",
+        "--cache-bytes",
+        "32768",
+        "--segment-bytes",
+        "1048576",
+        "--shards",
+        "4"
+      ],
+      "counters": {
+        "backups": 1,
+        "checkpoints": 12,
+        "commands_attempted": 6847,
+        "commands_completed": 5253,
+        "compactions": 12,
+        "concurrent_tuple_reads": 1849,
+        "cycles_completed": 370,
+        "dead_redrives": 44,
+        "dead_state_checks": 44,
+        "forced_process_crashes": 4,
+        "list_recovery_checks": 20,
+        "native_idempotent_retries": 379,
+        "native_recovery_idempotent_retries": 10,
+        "recovery_checks": 20,
+        "restored_worker_checks": 4,
+        "scheduled_cancellations": 44,
+        "scheduled_state_checks": 44,
+        "stale_receipts_rejected": 1578,
+        "unknown_observer_connections": 4,
+        "unknown_outcome_connections": 16
+      },
+      "durability": "strict",
+      "errors": [],
+      "memory_bound": {
+        "list_items_per_worker": 16,
+        "live_native_jobs_per_worker": 1,
+        "rss_report_samples_max": 2048,
+        "terminal_metadata": "queue deleted after each terminal idempotency check",
+        "workers": 4
+      },
+      "observed_active_workload_seconds": 15.00622337590903,
+      "observed_total_seconds": 15.433857374824584,
+      "ok": true,
+      "requested_workload_seconds": 15.0,
+      "restore": {
+        "command": [
+          "/Users/akhilgautam/projects/personal/ffkv/target/release/ffkv",
+          "restore",
+          "--source",
+          "/var/folders/s7/pv15tmjx3rlg0_s43vb4bbsc0000gn/T/ffkv-soak-v3ki9a97/hybrid/data/backups/soak-final",
+          "--data-dir",
+          "/var/folders/s7/pv15tmjx3rlg0_s43vb4bbsc0000gn/T/ffkv-soak-v3ki9a97/hybrid/restored"
+        ],
+        "exit_code": 0,
+        "status": "verified_real_process_reopen",
+        "stderr": "",
+        "stdout": "{\"data_frames\":4,\"sha256\":\"6ce8ed9614c66d02302599f8844a91702f3fceb0c592b6a0fb8e776498b18d3c\",\"wal_bytes\":259037}\n"
+      },
+      "rss_sample_count": 21,
+      "rss_samples": [
+        {
+          "bytes": 9699328,
+          "elapsed_seconds": 0.029259916860610247,
+          "phase": "idle",
+          "pid": 82075,
+          "source": "ps current RSS KiB"
+        },
+        {
+          "bytes": 10010624,
+          "elapsed_seconds": 0.03582708281464875,
+          "phase": "concurrent_maintenance",
+          "pid": 82075,
+          "source": "ps current RSS KiB"
+        },
+        {
+          "bytes": 11485184,
+          "elapsed_seconds": 1.0875376670155674,
+          "phase": "concurrent_maintenance",
+          "pid": 82075,
+          "source": "ps current RSS KiB"
+        },
+        {
+          "bytes": 11960320,
+          "elapsed_seconds": 2.1413744168821722,
+          "phase": "concurrent_maintenance",
+          "pid": 82075,
+          "source": "ps current RSS KiB"
+        },
+        {
+          "bytes": 12173312,
+          "elapsed_seconds": 3.1743707498535514,
+          "phase": "concurrent_maintenance",
+          "pid": 82075,
+          "source": "ps current RSS KiB"
+        },
+        {
+          "bytes": 10797056,
+          "elapsed_seconds": 4.109694124897942,
+          "phase": "recovered",
+          "pid": 82101,
+          "source": "ps current RSS KiB"
+        },
+        {
+          "bytes": 10895360,
+          "elapsed_seconds": 4.117680374998599,
+          "phase": "concurrent_maintenance",
+          "pid": 82101,
+          "source": "ps current RSS KiB"
+        },
+        {
+          "bytes": 11796480,
+          "elapsed_seconds": 5.156382167013362,
+          "phase": "concurrent_maintenance",
+          "pid": 82101,
+          "source": "ps current RSS KiB"
+        },
+        {
+          "bytes": 12124160,
+          "elapsed_seconds": 6.22055104188621,
+          "phase": "concurrent_maintenance",
+          "pid": 82101,
+          "source": "ps current RSS KiB"
+        },
+        {
+          "bytes": 12632064,
+          "elapsed_seconds": 7.26132741686888,
+          "phase": "concurrent_maintenance",
+          "pid": 82101,
+          "source": "ps current RSS KiB"
+        },
+        {
+          "bytes": 10797056,
+          "elapsed_seconds": 8.186750832945108,
+          "phase": "recovered",
+          "pid": 82131,
+          "source": "ps current RSS KiB"
+        },
+        {
+          "bytes": 10895360,
+          "elapsed_seconds": 8.194719832856208,
+          "phase": "concurrent_maintenance",
+          "pid": 82131,
+          "source": "ps current RSS KiB"
+        },
+        {
+          "bytes": 11780096,
+          "elapsed_seconds": 9.220847749849781,
+          "phase": "concurrent_maintenance",
+          "pid": 82131,
+          "source": "ps current RSS KiB"
+        },
+        {
+          "bytes": 12337152,
+          "elapsed_seconds": 10.288361083017662,
+          "phase": "concurrent_maintenance",
+          "pid": 82131,
+          "source": "ps current RSS KiB"
+        },
+        {
+          "bytes": 12369920,
+          "elapsed_seconds": 11.310583249898627,
+          "phase": "concurrent_maintenance",
+          "pid": 82131,
+          "source": "ps current RSS KiB"
+        },
+        {
+          "bytes": 10846208,
+          "elapsed_seconds": 12.2617946669925,
+          "phase": "recovered",
+          "pid": 82158,
+          "source": "ps current RSS KiB"
+        },
+        {
+          "bytes": 10960896,
+          "elapsed_seconds": 12.269797707907856,
+          "phase": "concurrent_maintenance",
+          "pid": 82158,
+          "source": "ps current RSS KiB"
+        },
+        {
+          "bytes": 12058624,
+          "elapsed_seconds": 13.29952145786956,
+          "phase": "concurrent_maintenance",
+          "pid": 82158,
+          "source": "ps current RSS KiB"
+        },
+        {
+          "bytes": 12419072,
+          "elapsed_seconds": 14.360500041861087,
+          "phase": "concurrent_maintenance",
+          "pid": 82158,
+          "source": "ps current RSS KiB"
+        },
+        {
+          "bytes": 10780672,
+          "elapsed_seconds": 15.321740749990568,
+          "phase": "recovered",
+          "pid": 82177,
+          "source": "ps current RSS KiB"
+        },
+        {
+          "bytes": 11747328,
+          "elapsed_seconds": 15.425358624896035,
+          "phase": "final",
+          "pid": 82177,
+          "source": "ps current RSS KiB"
+        }
+      ],
+      "rss_summary": {
+        "first_bytes": 9699328,
+        "growth_bytes": 2048000,
+        "last_bytes": 11747328,
+        "maximum_sampled_current_bytes": 12632064,
+        "note": "current RSS samples across PID generations; not allocator or cache size"
+      },
+      "storage": "hybrid",
+      "unknown_outcome_policy": "one pending list transition allows pre/post state, never retries remove-on-pop; native enqueue retries use persisted idempotency token",
+      "workload_and_recovery_seconds": 15.293707916978747
+    }
+  ],
+  "schema": 1,
+  "settings": {
+    "binary": "target/release/ffkv",
+    "cache_bytes": 32768,
+    "crash_every": 4,
+    "duration": 15.0,
+    "json": "/var/folders/s7/pv15tmjx3rlg0_s43vb4bbsc0000gn/T/ffkv-final-xuverikm/soak-release-final.json",
+    "list_bound": 16,
+    "maintenance_interval": 1,
+    "max_rss_samples": 2048,
+    "payload_bytes": 4096,
+    "restore_timeout": 120,
+    "rss_interval": 1,
+    "segment_bytes": 1048576,
+    "shards": 4,
+    "skip_restore": false,
+    "storage": [
+      "memory",
+      "hybrid"
+    ],
+    "timeout": 15,
+    "workers": 4
+  }
+}

@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 202 88" fill="currentColor" style="color-scheme: light dark" role="img" aria-labelledby="title">
+  <title id="title">ffkv — freaking fast KV</title>
+  <g transform="translate(12 12)">
+    <path d="M0 64V20C0 9 9 0 20 0H36L26 12H20C15.6 12 12 15.6 12 20V28H32L22 40H12V64Z"/>
+    <path d="M36 64V20C36 9 45 0 56 0H72L62 12H56C51.6 12 48 15.6 48 20V28H68L58 40H48V64Z"/>
+    <path d="M78 0H90V35L106 20H123L101 41L124 64H106L90 47V64H78Z"/>
+    <path d="M128 20H141L153 50L165 20H178L160 64H146Z"/>
+  </g>
+</svg>

@@ -1,0 +1,95 @@
+name: ffkv
+services:
+  ffkv:
+    image: ${FFKV_IMAGE:-ffkv:local}
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    user: "${FFKV_UID:?Use deploy/bootstrap.py as a nonroot user}:${FFKV_GID:?Use deploy/bootstrap.py}"
+    init: true
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 256
+    mem_limit: ${FFKV_MEMORY_LIMIT:-1g}
+    stop_grace_period: 60s
+    ports:
+      - "${FFKV_PUBLISH_ADDRESS:-127.0.0.1}:${FFKV_RESP_PORT:-6379}:6379"
+      - "${FFKV_PUBLISH_ADDRESS:-127.0.0.1}:${FFKV_MANAGEMENT_PORT:-8080}:8080"
+    command:
+      - --bind
+      - 0.0.0.0:6379
+      - --data-dir
+      - /var/lib/ffkv/data
+      - --durability
+      - ${FFKV_DURABILITY:-strict}
+      - --storage
+      - ${FFKV_STORAGE:-hybrid}
+      - --max-rss-bytes
+      - ${FFKV_MAX_RSS_BYTES:-0}
+      - --acl-file
+      - /run/ffkv/users.acl
+      - --tls-cert
+      - /run/ffkv/tls.crt
+      - --tls-key
+      - /run/ffkv/tls.key
+      - --management-bind
+      - 0.0.0.0:8080
+      - --management-token-file
+      - /run/ffkv/management-tokens.json
+      - --management-audit-file
+      - /var/lib/ffkv/management-audit.jsonl
+      - --management-tls-cert
+      - /run/ffkv/tls.crt
+      - --management-tls-key
+      - /run/ffkv/tls.key
+      - --console-dir
+      - /opt/ffkv/console
+    volumes:
+      - type: bind
+        source: ${FFKV_CONFIG_DIR:?Use deploy/bootstrap.py}/data
+        target: /var/lib/ffkv
+        bind: {create_host_path: false}
+      - type: bind
+        source: ${FFKV_CONFIG_DIR}/users.acl
+        target: /run/ffkv/users.acl
+        read_only: true
+        bind: {create_host_path: false}
+      - type: bind
+        source: ${FFKV_CONFIG_DIR}/management-tokens.json
+        target: /run/ffkv/management-tokens.json
+        read_only: true
+        bind: {create_host_path: false}
+      - type: bind
+        source: ${FFKV_CONFIG_DIR}/health-password
+        target: /run/ffkv/health-password
+        read_only: true
+        bind: {create_host_path: false}
+      - type: bind
+        source: ${FFKV_CONFIG_DIR}/tls.crt
+        target: /run/ffkv/tls.crt
+        read_only: true
+        bind: {create_host_path: false}
+      - type: bind
+        source: ${FFKV_CONFIG_DIR}/tls.key
+        target: /run/ffkv/tls.key
+        read_only: true
+        bind: {create_host_path: false}
+      - type: bind
+        source: ${FFKV_CONFIG_DIR}/ca.crt
+        target: /run/ffkv/ca.crt
+        read_only: true
+        bind: {create_host_path: false}
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=16m
+    healthcheck:
+      test: [CMD, python3, /usr/local/bin/ffkv-probe, --host, 127.0.0.1, --port, '6379', --username, health, --password-file, /run/ffkv/health-password, --tls-ca, /run/ffkv/ca.crt, --tls-server-name, localhost]
+      interval: 15s
+      timeout: 5s
+      start_period: 15s
+      retries: 3
+    networks: [ffkv]
+networks:
+  ffkv:
+    driver: bridge

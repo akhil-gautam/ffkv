@@ -1,0 +1,4 @@
+{
+  "search.label": "Search ffkv docs",
+  "search.devWarning": "Search is built locally with Pagefind. Run the documentation build and preview to search the complete handbook."
+}

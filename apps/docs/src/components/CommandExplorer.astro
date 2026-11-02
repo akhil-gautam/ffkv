@@ -1,0 +1,132 @@
+---
+import commandData from '../data/commands.json';
+import { docsLink } from '../lib/links';
+const commands = commandData.commands;
+const groups = [...new Set(commands.map((command) => command.group))];
+---
+
+<section class="command-explorer" data-command-explorer aria-label="Command explorer">
+  <form class="command-explorer__filters" data-filters hidden role="search" aria-label="Filter command reference">
+    <label class="command-explorer__search">
+      <span>Find a command</span>
+      <input type="search" name="q" placeholder="Name, description, or keyword" autocomplete="off" aria-controls="command-results" />
+    </label>
+    <label class="command-explorer__group">
+      <span>Command group</span>
+      <select name="group" aria-controls="command-results">
+        <option value="">All groups</option>
+        {groups.map((group) => <option value={group}>{group}</option>)}
+      </select>
+    </label>
+    <button type="reset" class="command-explorer__clear">Clear filters</button>
+  </form>
+  <p class="command-explorer__count" data-result-count role="status" aria-live="polite" aria-atomic="true">{commands.length} commands</p>
+  <noscript><p>All commands are listed below by group. Browser find works without JavaScript; each command link opens its complete reference page.</p></noscript>
+  <p class="command-explorer__empty" data-empty-state hidden>No commands match these filters. Try a shorter name or select “All groups”, or clear the filters.</p>
+  <div id="command-results" class="command-explorer__results">
+    {groups.map((group) => (
+      <section class="command-explorer__section" data-command-group={group} aria-label={group}>
+        <h3>{group}</h3>
+        <ul class="command-explorer__list">
+          {commands.filter((command) => command.group === group).map((command) => (
+            <li class="command-explorer__item" data-command-item data-search={`${command.name} ${command.description} ${command.group}`.toLowerCase()}>
+              <a href={docsLink(`/reference/commands/${command.slug}/`)}>
+                <code>{command.name}</code>
+                <span>{command.description}</span>
+              </a>
+            </li>
+          ))}
+        </ul>
+      </section>
+    ))}
+  </div>
+</section>
+
+<script>
+  function initializeCommandExplorers() {
+    document.querySelectorAll<HTMLElement>('[data-command-explorer]').forEach((root) => {
+      if (root.dataset.initialized) return;
+      const form = root.querySelector<HTMLFormElement>('[data-filters]');
+      const search = root.querySelector<HTMLInputElement>('input[name="q"]');
+      const group = root.querySelector<HTMLSelectElement>('select[name="group"]');
+      const count = root.querySelector<HTMLElement>('[data-result-count]');
+      const empty = root.querySelector<HTMLElement>('[data-empty-state]');
+      if (!form || !search || !group || !count || !empty) return;
+      root.dataset.initialized = 'true';
+      const sections = [...root.querySelectorAll<HTMLElement>('[data-command-group]')].map((section) => ({
+        section,
+        items: [...section.querySelectorAll<HTMLElement>('[data-command-item]')],
+      }));
+      function update(writeUrl = true) {
+        const query = search!.value.trim().toLowerCase();
+        const words = query.split(/\s+/).filter(Boolean);
+        const selectedGroup = group!.value.toLowerCase();
+        let total = 0;
+        for (const { section, items } of sections) {
+          const matchesGroup = !selectedGroup || section.dataset.commandGroup!.toLowerCase() === selectedGroup;
+          let visible = 0;
+          for (const item of items) {
+            const matches = matchesGroup && words.every((word) => item.dataset.search!.includes(word));
+            item.hidden = !matches;
+            if (matches) visible++;
+          }
+          section.hidden = visible === 0;
+          total += visible;
+        }
+        count!.textContent = `${total} ${total === 1 ? 'command' : 'commands'}${query || selectedGroup ? ' matching filters' : ''}`;
+        empty!.hidden = total !== 0;
+        if (writeUrl) {
+          const url = new URL(window.location.href);
+          const value = search!.value.trim();
+          if (value) url.searchParams.set('q', value); else url.searchParams.delete('q');
+          if (group!.value) url.searchParams.set('group', group!.value); else url.searchParams.delete('group');
+          window.history.replaceState(window.history.state, '', url);
+        }
+      }
+      function readUrl() {
+        const params = new URL(window.location.href).searchParams;
+        search!.value = params.get('q') ?? '';
+        const wantedGroup = (params.get('group') ?? '').toLowerCase();
+        group!.value = [...group!.options].find((option) => option.value.toLowerCase() === wantedGroup)?.value ?? '';
+        update(false);
+      }
+      form.hidden = false;
+      form.addEventListener('submit', (event) => { event.preventDefault(); update(); });
+      search.addEventListener('input', () => update());
+      group.addEventListener('change', () => update());
+      form.addEventListener('reset', (event) => {
+        event.preventDefault();
+        search.value = '';
+        group.value = '';
+        update();
+        search.focus();
+      });
+      window.addEventListener('popstate', readUrl);
+      readUrl();
+    });
+  }
+  initializeCommandExplorers();
+  document.addEventListener('astro:page-load', initializeCommandExplorers);
+</script>
+
+<style>
+  [hidden] { display: none !important; }
+  .command-explorer__filters { display: flex; flex-wrap: wrap; align-items: end; gap: 1rem; margin-block: 1.5rem 1rem; }
+  .command-explorer__filters label { display: grid; gap: .4rem; margin: 0; }
+  .command-explorer__search { flex: 1 1 16rem; }
+  .command-explorer__group { flex: 1 1 13rem; }
+  .command-explorer__filters input, .command-explorer__filters select, .command-explorer__clear { min-height: 2.75rem; max-width: 100%; padding: .6rem .75rem; border: 1px solid var(--sl-color-gray-4); border-radius: .4rem; background: var(--sl-color-bg); color: var(--sl-color-text); font: inherit; }
+  .command-explorer__filters input { width: 100%; }
+  .command-explorer__clear { cursor: pointer; }
+  .command-explorer__filters :is(input, select, button):focus-visible { outline: 2px solid var(--sl-color-text-accent); outline-offset: 3px; }
+  .command-explorer__clear:hover { border-color: var(--sl-color-text-accent); }
+  .command-explorer__count { font-variant-numeric: tabular-nums; color: var(--sl-color-gray-2); }
+  .command-explorer__empty { border: 1px solid var(--sl-color-gray-4); border-radius: .5rem; padding: 1rem; }
+  .command-explorer__list { list-style: none; padding: 0; }
+  .command-explorer__item { margin: 0; border-bottom: 1px solid var(--sl-color-gray-5); }
+  .command-explorer__item a { display: grid; gap: .25rem; padding: .85rem .25rem; text-decoration: none; }
+  .command-explorer__item a:hover code { text-decoration: underline; text-underline-offset: .2em; }
+  .command-explorer__item span { color: var(--sl-color-gray-2); font-size: .9rem; }
+  .command-explorer__item code { width: fit-content; color: var(--sl-color-text-accent); }
+  .command-explorer__section h3 { scroll-margin-top: 6rem; }
+</style>
