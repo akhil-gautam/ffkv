@@ -25,6 +25,14 @@ target/release/ffkv-cli --help
 target/release/ffkv-mcp --help
 ```
 
+Optionally, install the native client onto your PATH from the checkout:
+
+```sh
+cargo install --path . --locked --bin ffkv-cli --target-dir target
+```
+
+Add Cargo's `bin` directory to your PATH if it is not already present.
+
 The repository's package is not published to crates.io. Build from the checkout you intend to run; restarting an old process is necessary to load a new executable.
 
 ## Choose a storage mode

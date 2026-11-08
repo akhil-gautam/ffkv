@@ -43,7 +43,7 @@ cargo build --release --bins
   --evidence-report .ffkv-bdd-release-evidence.json
 ```
 
-Do not report historical README scenario/test totals as a fresh run result. Record the current commit, binary profile, full invocation, failures/skips and evidence artifact from the actual run.
+Do not report historical scenario/test totals as a fresh run result. Record the current commit, binary profile, full invocation, failures/skips and evidence artifact from the actual run.
 
 ## Scoped feedback is not full verification
 
@@ -81,7 +81,7 @@ cargo test
 cargo clippy --all-targets -- -D warnings
 ```
 
-The existing smoke harnesses use isolated live sockets/processes. Build the intended binary first and consult each script's `--help` when selecting a nondefault binary. The README's current suite includes:
+The existing smoke harnesses use isolated live sockets/processes. Build the intended binary first and consult each script's `--help` when selecting a nondefault binary. The current suite includes:
 
 ```sh
 python3 tests/cli_smoke.py
@@ -147,7 +147,7 @@ BUNDLE_GEMFILE=tests/sidekiq/Gemfile bundle install
 python3 tests/sidekiq_smoke.py --binary target/debug/ffkv
 ```
 
-The repository fixture pins Sidekiq 8.0.7, redis-client 0.26.2 and connection_pool 2.5.4. It exercises a real worker, scheduler/retry Lua, heartbeat/process/stats behavior and session-backed Web pages. Failure logs are retained under target. Sidekiq's normal BRPOP fetch remains remove-on-delivery, not native lease redelivery. An additional application integration described in the README is separate evidence, not a self-contained replacement for this fixture.
+The repository fixture pins Sidekiq 8.0.7, redis-client 0.26.2 and connection_pool 2.5.4. It exercises a real worker, scheduler/retry Lua, heartbeat/process/stats behavior and session-backed Web pages. Failure logs are retained under target. Sidekiq's normal BRPOP fetch remains remove-on-delivery, not native lease redelivery. The [application integration](/guides/sidekiq/#application-integration-on-a-newer-stack) on a newer stack is separate evidence, not a self-contained replacement for this fixture.
 
 ## Optional differential checks
 

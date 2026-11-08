@@ -26,7 +26,9 @@ Earlier core differential smokes used Redis 8.2.1; metadata/newer contracts are 
 
 RESP2 is the default; select RESP3 with `-3` or HELLO 3. Keys/values are bytes, not necessarily UTF-8. Requests cap at 8 MiB including framing and 1,024 arguments. Client replies have bounded logical/wire allocation, depth, and value counts. RESP3 streamed/unknown-length frame syntax is unsupported. Server inline syntax is simple space/tab separation, not shell/native-CLI quoting.
 
-Standalone mode defaults to 16 logical databases, configurable with `--databases`; cluster mode exposes database zero. Scan cursors are opaque stable hash-order positions, COUNT is a hint, and iteration is not a snapshot. Array ARSCAN instead returns index/value pairs and is not a SCAN cursor API.
+Standalone mode defaults to 16 logical databases, configurable with `--databases`; `SELECT`, `COPY ... DB`, `MOVE` and `SWAPDB` share that limit. Cluster mode exposes database zero. Scan cursors are opaque stable hash-order positions, COUNT is a hint, and iteration is not a snapshot. Array ARSCAN instead returns index/value pairs and is not a SCAN cursor API.
+
+`UNLINK` and `FLUSHDB`/`FLUSHALL ASYNC` remove logical ownership immediately and release retired payloads on dedicated background workers. `SORT` reads only the external BY keys and selected GET keys it needs, across owning shards.
 
 Strings/bitmaps are capped at 8 MiB per value. Extended families have additional [limits](/reference/limits/). Arrays use exact integer aggregates when operands are integers; real/mixed arithmetic uses binary64 rather than platform-specific C extended precision. All types remain subject to request/reply budgets.
 

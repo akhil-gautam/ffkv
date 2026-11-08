@@ -7,7 +7,7 @@ The repository contains a Rust/Tokio server, native Rust CLI, React management c
 
 ## Prerequisites and build
 
-The README's supported development baseline is macOS/Linux with Rust **1.99 or newer**. Use Python 3 for harnesses, a C compiler for the native call shim/module fixtures, and OpenSSL for TLS fixtures. Lua 5.1 is vendored through `mlua`; no external Redis installation is required for the server or native client. Node 22/npm is needed for the React console. Ruby/Bundler is needed only for the pinned Sidekiq integration.
+The supported development baseline is macOS/Linux with Rust **1.99 or newer**. Use Python 3 for harnesses, a C compiler for the native call shim/module fixtures, and OpenSSL for TLS fixtures. Lua 5.1 is vendored through `mlua`; no external Redis installation is required for the server or native client. Node 22/npm is needed for the React console. Ruby/Bundler is needed only for the pinned Sidekiq integration.
 
 From the repository root:
 
@@ -73,4 +73,4 @@ The console's actual package scripts are `dev`, `build` and `preview`; build use
 
 ## Before proposing a change
 
-Add focused regression coverage at the owning module and real protocol scenarios for user-visible behavior. Update command metadata/catalog evidence when a command contract changes, plus the relevant docs. Use [testing](/contributing/testing/) for the complete BDD gate versus scoped feedback, and [benchmarks](/contributing/benchmarks/) for measurement methodology. Report only checks actually run on your checkout, not the README's historical counts. No license grant should be inferred from a repository without a LICENSE file.
+Add focused regression coverage at the owning module and real protocol scenarios for user-visible behavior. Update command metadata/catalog evidence when a command contract changes, plus the relevant docs. Use [testing](/contributing/testing/) for the complete BDD gate versus scoped feedback, and [benchmarks](/contributing/benchmarks/) for measurement methodology. Report only checks actually run on your checkout, not historical counts. No license grant should be inferred from a repository without a LICENSE file.

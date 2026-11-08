@@ -33,6 +33,8 @@ SET supports NX/XX, GET, and one expiry mode: EX, PX, EXAT, PXAT, or KEEPTTL. Or
 
 SET may replace another type, but SET GET on a list fails WRONGTYPE without replacing it. GET/arithmetic reject incompatible types. An expiration deadline uses wall-clock time, including downtime; TTL/PTTL distinguish persistent (`-1`) and missing (`-2`) keys.
 
+EXPIRE, PEXPIRE, EXPIREAT and PEXPIREAT accept `NX`, `XX`, `GT` and `LT`. `NX` conflicts with all other conditions; `GT` and `LT` conflict with each other; `XX` can combine with `GT` or `LT`.
+
 ## Limits, bytes, and durability
 
 Stored strings/bitmap writes cap at **8 MiB**, and the 8 MiB request budget includes framing, so a single maximum-size value may be rejected earlier. Use `-x` for NUL-containing payloads:

@@ -16,7 +16,11 @@ ffkv runs the repository's unmodified Sidekiq OSS integration over RESP, includi
 | Rack / rack-session | 3.2.6 / 2.1.2 |
 | Puma | 8.0.0 |
 
-The fixture pins connection_pool because 3.0.2 changes the TimedStack API used by this Sidekiq release. It does not patch installed gem source. The README separately records an application integration on newer Ruby/Rails/Sidekiq with cron/uniqueness plugins; that does not change the self-contained fixture's pinned versions.
+The fixture pins connection_pool because 3.0.2 changes the TimedStack API used by this Sidekiq release. It does not patch installed gem source.
+
+## Application integration on a newer stack
+
+A separate local Rails application integration exercised Ruby 4.0.9, Rails 8.1.2.1, Sidekiq 8.1.1, redis 5.4.1, redis-client 0.29.0, connection_pool 3.0.2, sidekiq-cron 2.4.0 and sidekiq-unique-jobs 8.0.13 without modifying those gems. The actual worker exercised `until_executing` duplicate rejection and `until_and_while_executing` replacement conflicts, lock release/reacquisition, cron registration/due-slot deduplication and execution after WAL recovery. A real subscriber received the uniqueness middleware's Lua-published changelog with history and locking enabled. Rails cache serialization/counters, session middleware across two requests and rate-limit counters were also exercised. This used the application's installed bundle; it is separate evidence and does not change the self-contained fixture's pinned versions.
 
 ## Point both client and worker at ffkv
 

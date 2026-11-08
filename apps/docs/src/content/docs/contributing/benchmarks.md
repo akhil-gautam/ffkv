@@ -56,13 +56,43 @@ The current default release build (no PGO) completed **162/162 passing trials**
 in the nine-workload, three-profile matrix with two repetitions per engine. All
 engines used the same ARM64 Linux VM, four server CPUs and four separate client
 CPUs: Redis/redis-benchmark **8.2.1**, Dragonfly **2.0.2** with four proactors,
-and **64 ffkv logical shards**, memory mode only.
+and **64 ffkv logical shards**, memory mode only. The host was an Apple M4
+MacBook Pro (10 cores, 16 GiB); every server and client ran inside one ARM64
+Linux VM (OrbStack), servers on CPUs 0–3 and the load generator on CPUs 4–7.
 
 ffkv had higher medians than Dragonfly in **27/27** combinations, and every ffkv
 trial was above every Dragonfly trial for the same case. Against Redis it was
 higher in **18/27**; the nine single-client cases stayed 0.5–4% below Redis.
 The narrowest Dragonfly margin was pipelined INCR, at **1.04×** median and
 **1.03×** worst-case.
+
+Memory-only medians (commands/s) with **1 client, no pipelining**:
+
+| Workload | ffkv | Dragonfly | Redis | ffkv vs Dragonfly | ffkv vs Redis |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| GET 256 B | 21,547 | 13,227 | 22,415 | **1.63×** | 0.96× |
+| SET 256 B | 21,388 | 13,114 | 21,929 | **1.63×** | 0.98× |
+| GET 4 KiB | 20,669 | 12,443 | 21,002 | **1.66×** | 0.98× |
+| SET 4 KiB | 20,419 | 12,512 | 20,954 | **1.63×** | 0.97× |
+| INCR | 21,468 | 13,342 | 22,365 | **1.61×** | 0.96× |
+| HGET | 22,019 | 13,193 | 22,379 | **1.67×** | 0.98× |
+| HSET | 21,747 | 13,014 | 22,039 | **1.67×** | 0.99× |
+| ZADD | 21,283 | 12,870 | 21,380 | **1.65×** | 0.995× |
+| ZRANGE (10 members) | 21,025 | 12,862 | 21,856 | **1.63×** | 0.96× |
+
+Memory-only medians (commands/s) with **32 clients, no pipelining**:
+
+| Workload | ffkv | Dragonfly | Redis | ffkv vs Dragonfly | ffkv vs Redis |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| GET 256 B | 597,096 | 338,504 | 358,598 | **1.76×** | 1.67× |
+| SET 256 B | 578,372 | 339,073 | 339,196 | **1.71×** | 1.71× |
+| GET 4 KiB | 546,983 | 301,687 | 282,093 | **1.81×** | 1.94× |
+| SET 4 KiB | 525,455 | 305,616 | 282,125 | **1.72×** | 1.86× |
+| INCR | 595,150 | 338,542 | 359,802 | **1.76×** | 1.65× |
+| HGET | 583,295 | 338,542 | 338,542 | **1.72×** | 1.72× |
+| HSET | 559,829 | 338,542 | 338,354 | **1.65×** | 1.65× |
+| ZADD | 432,670 | 320,660 | 237,959 | **1.35×** | 1.82× |
+| ZRANGE (10 members) | 554,188 | 321,313 | 321,805 | **1.72×** | 1.72× |
 
 Memory-only medians with **32 clients, pipeline depth 16 and four client threads**:
 
@@ -77,6 +107,15 @@ Memory-only medians with **32 clients, pipeline depth 16 and four client threads
 | HSET | 2,628,055 | 1,514,368 | 2,447,099 |
 | ZADD, existing member/new score | 2,398,487 | 548,041 | 1,835,926 |
 | ZRANGE, ten members | 1,786,067 | 1,094,335 | 1,485,170 |
+
+Reproduce the matrix with the same compiled `redis-benchmark` for every engine:
+
+```sh
+python3 benchmarks/redis_compare.py --engines ffkv redis dragonfly --modes memory \
+  --binary target/release/ffkv --redis-binary redis-server --benchmark-binary redis-benchmark \
+  --dragonfly-binary dragonfly --dragonfly-threads 4 --ffkv-shards 64 \
+  --server-cpus 0-3 --client-cpus 4-7 --repetitions 2 --target-seconds 5 --json comparison.json
+```
 
 The source changes behind this result, in order:
 
@@ -1055,7 +1094,23 @@ This is a **finite** workload with owned data/processes. It exercises concurrent
 
 ## Existing evidence and honest claims
 
-Repository artifacts are `benchmarks/results/macos-arm64.json` and `benchmarks/results/soak-macos-arm64.json`; the README records their original environment and selected rows. They are historical single-workstation evidence, not checks rerun by this site. Read the full report before quoting any result and include engine/version, OS/architecture, concurrency/pipeline, payload/backlog, storage/durability, cache and latency semantics.
+Repository artifacts are `benchmarks/results/macos-arm64.json` and `benchmarks/results/soak-macos-arm64.json`. They are historical single-workstation evidence, not checks rerun by this site. Read the full report before quoting any result and include engine/version, OS/architecture, concurrency/pipeline, payload/backlog, storage/durability, cache and latency semantics.
+
+The list/hybrid run used a shared development workstation: macOS 27.0.1/arm64, 10 logical CPUs, Python 3.12.10, ffkv 0.1.0 release and Redis 8.2.1; 4,096 queued bodies, four clients, pipeline eight, hybrid cache 1 MiB and inline threshold 1 KiB. All 24 cases completed without reported command errors. Selected **strict durability** rows (single run, not a general speed claim):
+
+| Engine/storage | Body | Backlog RSS MiB | Enqueue ops/s | Hot reads/s | Hot P99 ms |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| ffkv memory | 256 B | 9.86 | 233 | 44,596 | 0.830 |
+| ffkv hybrid | 256 B | 11.11 | 501 | 44,444 | 0.778 |
+| Redis | 256 B | 8.59 | 2,448 | 120,547 | 0.585 |
+| ffkv memory | 4 KiB | 34.31 | 290 | 46,519 | 0.787 |
+| ffkv hybrid | 4 KiB | 12.36 | 343 | 42,846 | 0.851 |
+| Redis | 4 KiB | 28.22 | 2,519 | 61,954 | 0.855 |
+| ffkv memory | 64 KiB | 318.48 | 365 | 23,417 | 1.769 |
+| ffkv hybrid | 64 KiB | 26.59 | 335 | 23,526 | 1.753 |
+| Redis | 64 KiB | 268.62 | 715 | 25,253 | 1.737 |
+
+The finite concurrent soak exercised 15 active seconds in **each** storage mode, four SIGKILL/recovery cycles per mode, concurrent checkpoint/compaction, stale receipts, idempotency, and backup restoration into a real new process. It is not a seven-day soak, simulated device power loss or production certification.
 
 The published baseline demonstrates a memory/throughput tradeoff, including worse small-body overhead and strict-write throughput below Redis in that run. It does not establish a universal speed advantage, an 80% throughput target, performance-per-dollar, million-job/beyond-RAM capability, Valkey/Dragonfly results or production HA. Those require their own executed workloads and evidence. Keep [behavioral tests](/contributing/testing/) and performance measurements separate: a fast incorrect or unverified case is not a useful benchmark.
 
