@@ -2,7 +2,6 @@
 import hashlib
 import json
 import secrets
-import socket
 from behave import given, when, then
 from replication_runtime import (
     NativeProbe, ReplicationFixture, dataset, eventually, frame, info,
@@ -17,18 +16,17 @@ def polling_pair(context):
     policy = runtime.directory / "polling-token-policy.json"
     credential = runtime.directory / "polling-token"
     policy.write_text(json.dumps({"tokens": [{"name": "owned-polling", "role": "admin", "sha256": hashlib.sha256(token.encode()).hexdigest()}]}))
+    policy.chmod(0o600)
     credential.write_text(token + "\n")
     credential.chmod(0o600)
-    with socket.socket() as reservation:
-        reservation.bind(("127.0.0.1", 0))
-        port = reservation.getsockname()[1]
-    runtime.add_node("polling-source", [
-        "--management-bind", f"127.0.0.1:{port}", "--management-token-file", str(policy),
+    source = runtime.add_node("polling-source", [
+        "--management-bind", "127.0.0.1:0", "--management-token-file", str(policy),
         "--management-audit-file", str(runtime.directory / "polling-audit.jsonl"), "--replication-export",
         "--databases", "64",
     ])
+    host, port = source.management_address
     runtime.add_node("polling-follower", [
-        "--replica-source", f"http://127.0.0.1:{port}", "--replica-token-file", str(credential),
+        "--replica-source", f"http://{host}:{port}", "--replica-token-file", str(credential),
         "--replica-allow-loopback-http", "--replica-interval-ms", "100", "--replica-timeout-ms", "5000",
         "--databases", "64",
     ])
@@ -107,6 +105,20 @@ def exceed_backlog(context):
 def same_dataset(context):
     owned = fixture(context)
     expected = dataset(owned.master)
+    # A captured FULLRESYNC header proves the selected protocol, not completion
+    # of the follower's RDB installation. Connected is published before the
+    # actor's ready transition, so require both the new offset and loading=0.
+    eventually(
+        lambda: info(owned.replica),
+        lambda observed: observed.get("master_link_status") == "up"
+        and int(observed.get("slave_repl_offset", "-1")) >= owned.reconnect_target,
+        "replica did not reach the reconnected primary position",
+    )
+    eventually(
+        lambda: owned.replica.execute(["INFO", "persistence"], "__dataset_observer"),
+        lambda observed: isinstance(observed, str) and "loading:0" in observed.splitlines(),
+        "replica did not complete dataset installation",
+    )
     eventually(lambda: dataset(owned.replica), lambda actual: actual == expected, "full synchronization did not install the complete primary dataset")
 
 

@@ -3,7 +3,7 @@ use std::{
     collections::{BTreeMap, BTreeSet},
     sync::{
         Arc, Mutex,
-        atomic::{AtomicUsize, Ordering},
+        atomic::{AtomicBool, AtomicUsize, Ordering},
     },
 };
 
@@ -32,10 +32,32 @@ struct Client {
     budget: Arc<Budget>,
 }
 
+impl Client {
+    /// Mirrors the registration predicate for lock-free `Subscription::active`.
+    /// Mutations call this under the registry lock, so stores follow lock order.
+    fn sync_active(&self) {
+        let active = !self.channels.is_empty()
+            || !self.patterns.is_empty()
+            || !self.shard_channels.is_empty();
+        self.budget.active.store(active, Ordering::Release);
+    }
+}
+
+/// Every removal (acknowledgement overflow, slow-reader eviction, id
+/// replacement, owner drop) drops the entry: unregistered is never active.
+impl Drop for Client {
+    fn drop(&mut self) {
+        self.budget.active.store(false, Ordering::Release);
+    }
+}
+
+/// Shared by a client's registry entry, its subscription and queued messages.
 #[derive(Default)]
 struct Budget {
     bytes: AtomicUsize,
     messages: AtomicUsize,
+    /// Registered with at least one channel, pattern or shard channel.
+    active: AtomicBool,
 }
 
 /// The charge survives dequeue, covering an arbitrarily slow in-flight socket write.
@@ -70,6 +92,7 @@ pub struct Subscription {
     id: u64,
     receiver: mpsc::Receiver<Message>,
     cancel: watch::Receiver<bool>,
+    budget: Arc<Budget>,
 }
 
 /// Commit gates enter client FIFOs immediately, preserving ordering with racing
@@ -122,6 +145,7 @@ impl Hub {
     pub fn attach(self: &Arc<Self>, id: u64) -> Subscription {
         let (sender, receiver) = mpsc::channel(MAX_MESSAGES);
         let (cancel, cancelled) = watch::channel(false);
+        let budget = Arc::new(Budget::default());
         self.clients.lock().expect("pubsub registry").insert(
             id,
             Client {
@@ -130,7 +154,7 @@ impl Hub {
                 shard_channels: BTreeSet::new(),
                 sender,
                 cancel,
-                budget: Arc::new(Budget::default()),
+                budget: budget.clone(),
             },
         );
         Subscription {
@@ -138,6 +162,7 @@ impl Hub {
             id,
             receiver,
             cancel: cancelled,
+            budget,
         }
     }
 
@@ -417,16 +442,7 @@ impl Subscription {
         self.receiver.try_recv().ok()
     }
     pub fn active(&self) -> bool {
-        self.hub
-            .clients
-            .lock()
-            .expect("pubsub registry")
-            .get(&self.id)
-            .is_some_and(|client| {
-                !client.channels.is_empty()
-                    || !client.patterns.is_empty()
-                    || !client.shard_channels.is_empty()
-            })
+        self.budget.active.load(Ordering::Acquire)
     }
     pub fn clear(&mut self) {
         if let Some(client) = self
@@ -439,6 +455,7 @@ impl Subscription {
             client.channels.clear();
             client.patterns.clear();
             client.shard_channels.clear();
+            client.sync_active();
         }
         while self.receiver.try_recv().is_ok() {}
     }
@@ -559,6 +576,7 @@ impl Subscription {
                 return Err(error("Pub/Sub output buffer limit exceeded"));
             }
         }
+        client.sync_active();
         Ok(())
     }
 }
@@ -602,6 +620,7 @@ mod tests {
             .unwrap();
         assert_eq!(publication.count(), 2);
         subscriber.command(&args(&[b"UNSUBSCRIBE"])).unwrap();
+        assert!(subscriber.active(), "the pattern registration remains");
         let mut direct = subscriber.recv().await.unwrap();
         let mut pattern = subscriber.recv().await.unwrap();
         assert_eq!(direct.values[0], bulk(Bytes::from_static(b"message")));
@@ -632,6 +651,7 @@ mod tests {
             .command(&args(&[b"SUBSCRIBE", b"channel"]))
             .unwrap();
         drop(subscriber.recv().await.unwrap());
+        assert!(subscriber.active());
         let payload = Bytes::from(vec![0; 6 * 1024 * 1024]);
         let first = hub
             .stage(&Bytes::from_static(b"channel"), &payload)
@@ -694,6 +714,7 @@ mod tests {
         assert!(subscriber.try_recv().is_none());
         subscriber.command(&args(&[b"SUBSCRIBE", b"x"])).unwrap();
         drop(subscriber.recv().await.unwrap());
+        assert!(subscriber.active());
         for _ in 0..MAX_MESSAGES {
             assert_eq!(
                 hub.publish(&Bytes::from_static(b"x"), &Bytes::new())
@@ -707,6 +728,54 @@ mod tests {
             0
         );
         assert!(*subscriber.cancellation().borrow());
+        assert!(!subscriber.active());
+        assert_eq!(hub.counts(1), (0, 0, 0));
+    }
+
+    #[tokio::test]
+    async fn activity_tracks_mixed_kinds_cancellation_and_acknowledgement_overflow() {
+        let hub = Arc::new(Hub::default());
+        let mut subscriber = hub.attach(1);
+        let mut oversized = vec![Bytes::from_static(b"SUBSCRIBE")];
+        oversized.extend((0..=MAX_SUBSCRIPTIONS).map(|n| Bytes::from(n.to_string())));
+        let limit = Err(error("subscription limit exceeded"));
+        assert_eq!(subscriber.command(&oversized), limit);
+        assert!(!subscriber.active());
+        subscriber
+            .command(&args(&[b"SSUBSCRIBE", b"shard"]))
+            .unwrap();
+        subscriber.command(&args(&[b"SUBSCRIBE", b"x"])).unwrap();
+        drop(subscriber.recv().await.unwrap());
+        drop(subscriber.recv().await.unwrap());
+        subscriber.command(&args(&[b"UNSUBSCRIBE"])).unwrap();
+        drop(subscriber.recv().await.unwrap());
+        assert!(subscriber.active(), "the shard registration remains");
+        assert_eq!(subscriber.command(&oversized), limit);
+        assert!(subscriber.active());
+        subscriber
+            .command(&args(&[b"SUNSUBSCRIBE", b"shard"]))
+            .unwrap();
+        drop(subscriber.recv().await.unwrap());
+        assert!(!subscriber.active());
+        subscriber.command(&args(&[b"SUBSCRIBE", b"x"])).unwrap();
+        drop(subscriber.recv().await.unwrap());
+        // Cancellation alone keeps registrations until the owner exits.
+        hub.disconnect(1);
+        assert!(*subscriber.cancellation().borrow());
+        assert!(subscriber.active());
+        for _ in 1..MAX_MESSAGES {
+            assert_eq!(
+                hub.publish(&Bytes::from_static(b"x"), &Bytes::new())
+                    .unwrap(),
+                1
+            );
+        }
+        assert_eq!(
+            subscriber.command(&args(&[b"SUBSCRIBE", b"y", b"z"])),
+            Err(error("Pub/Sub output buffer limit exceeded"))
+        );
+        assert!(!subscriber.active());
+        assert_eq!(hub.counts(1), (0, 0, 0));
     }
 
     #[tokio::test]

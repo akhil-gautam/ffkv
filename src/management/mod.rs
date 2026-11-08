@@ -233,7 +233,9 @@ impl App {
 }
 fn validate(args: &[Bytes]) -> Result<()> {
     crate::protocol::validate_command(args).map_err(|_| ApiError::bad("invalid command vector"))?;
-    crate::engine::Engine::validate(args).map_err(|_| ApiError::bad("invalid command syntax"))?;
+    crate::engine::BoundCommand::bind(args)
+        .check()
+        .map_err(|_| ApiError::bad("invalid command syntax"))?;
     Ok(())
 }
 fn admin(p: &Principal) -> Result<()> {

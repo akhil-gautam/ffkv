@@ -203,7 +203,7 @@ enum Algebra {
 impl Engine {
     fn set_add(&mut self, args: &[Bytes], now: i64) -> Resp {
         let journal = self.journal_enabled;
-        let value = self.collection_entry(&args[1], now, || Value::Set(SetValue::default()));
+        let value = self.collection_entry(&args[1], now, || Value::Set(Box::default()));
         let Value::Set(set) = value else {
             return wrong_type();
         };
@@ -285,7 +285,7 @@ impl Engine {
     fn set_is_members(&mut self, args: &[Bytes], now: i64) -> Resp {
         let limit = self.reply_limit;
         let set = match self.value(&args[1], now) {
-            Some(Value::Set(set)) => Some(set),
+            Some(Value::Set(set)) => Some(&**set),
             None => None,
             _ => return wrong_type(),
         };
@@ -363,7 +363,7 @@ impl Engine {
             None => None,
         };
         let set = match self.value(&args[1], now) {
-            Some(Value::Set(set)) => set,
+            Some(Value::Set(set)) => &**set,
             None => {
                 return if count.is_none() {
                     Resp::Bulk(None)
@@ -437,7 +437,7 @@ impl Engine {
             members: vec![member.clone()],
         });
         let Value::Set(set) =
-            self.collection_entry(destination, now, || Value::Set(SetValue::default()))
+            self.collection_entry(destination, now, || Value::Set(Box::default()))
         else {
             unreachable!("validated destination remains a set");
         };
@@ -534,7 +534,7 @@ impl Engine {
                 Some(Entry {
                     value: Value::Set(set),
                     ..
-                }) => Some(set),
+                }) => Some(&**set),
                 None => None,
                 _ => unreachable!("validated cardinality source"),
             })
@@ -607,7 +607,7 @@ impl Engine {
                 Some(Entry {
                     value: Value::Set(set),
                     ..
-                }) => Some(set),
+                }) => Some(&**set),
                 None => None,
                 _ => unreachable!("validated algebra source remains a set"),
             })
@@ -729,7 +729,7 @@ impl Engine {
             self.write_entry(
                 destination.clone(),
                 Entry {
-                    value: Value::Set(set),
+                    value: Value::Set(Box::new(set)),
                     expires_at: None,
                     access: crate::engine::AccessMetadata::default(),
                 },
@@ -768,7 +768,7 @@ impl Engine {
         if members.is_empty() {
             return Err(invalid_journal());
         }
-        let Value::Set(set) = self.collection_entry(&key, now, || Value::Set(SetValue::default()))
+        let Value::Set(set) = self.collection_entry(&key, now, || Value::Set(Box::default()))
         else {
             return Err(invalid_journal());
         };

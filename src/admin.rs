@@ -80,8 +80,11 @@ pub async fn execute(
         );
         let store = paused.engines.first().and_then(Engine::storage).cloned();
         let mode = if store.is_some() { "hybrid" } else { "memory" };
-        let (count, _) =
-            paused.collect_global(GlobalCommand::Dbsize, &[Bytes::from_static(b"DBSIZE")], now)?;
+        let (count, _) = paused.collect_global(
+            GlobalCommand::Dbsize,
+            &mut crate::engine::BoundCommand::bind(&[Bytes::from_static(b"DBSIZE")]),
+            now,
+        )?;
         return Ok(map([
             (
                 "server",

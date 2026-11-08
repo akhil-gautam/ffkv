@@ -6,7 +6,10 @@ fn run(engine: &mut Engine, now: i64, args: &[&[u8]]) -> Resp {
         .iter()
         .map(|v| Bytes::copy_from_slice(v))
         .collect::<Vec<_>>();
-    match engine.execute_at_time(&args, now).unwrap() {
+    match engine
+        .execute_at_time(&mut crate::engine::BoundCommand::bind(&args), now)
+        .unwrap()
+    {
         Execution::Reply(reply) => reply,
         Execution::Pushed { reply, .. } => reply,
         _ => panic!("unexpected blocked command"),

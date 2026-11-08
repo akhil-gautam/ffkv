@@ -9,6 +9,7 @@ use std::collections::{HashMap, VecDeque};
 use std::fs::{File, OpenOptions};
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 use subtle::{Choice, ConstantTimeEq};
@@ -31,14 +32,27 @@ const MAX_GLOB_WORK: usize = 8 * 1024 * 1024;
 const MAX_LOG_ENTRIES: usize = 128;
 
 pub struct Acl {
+    /// Published snapshots. Writers mark every replaced or removed snapshot
+    /// superseded before releasing this lock.
     users: RwLock<HashMap<String, Arc<User>>>,
     path: Option<PathBuf>,
     file_lock: Mutex<()>,
     log: Mutex<DenialLog>,
 }
 
+/// One user snapshot. Its policy is immutable once published and shared by
+/// every clone, so a connection's own handle on a snapshot costs one small
+/// allocation, and counting references to that handle for each command
+/// writes no line another connection uses. Mutation copies the policy first.
 #[derive(Clone)]
 pub struct User {
+    policy: Arc<Policy>,
+    superseded: Superseded,
+}
+
+/// A user's rules and identity, read through [`User`].
+#[derive(Clone)]
+pub struct Policy {
     name: String,
     identity: Arc<()>,
     enabled: bool,
@@ -47,6 +61,36 @@ pub struct User {
     root: Selector,
     selectors: Vec<Selector>,
     namespace_cache: Arc<Mutex<namespace::Cache>>,
+}
+
+impl std::ops::Deref for User {
+    type Target = Policy;
+
+    fn deref(&self) -> &Policy {
+        &self.policy
+    }
+}
+
+impl std::ops::DerefMut for User {
+    /// Copies a policy other clones share before changing it.
+    fn deref_mut(&mut self) -> &mut Policy {
+        Arc::make_mut(&mut self.policy)
+    }
+}
+
+/// Set once, inside the directory writer's critical section and so before
+/// ACL SETUSER, DELUSER or LOAD is acknowledged, when the entry publishing
+/// this snapshot is replaced or removed. Never cleared: no path republishes a
+/// removed snapshot.
+#[derive(Default)]
+struct Superseded(AtomicBool);
+
+impl Clone for Superseded {
+    /// A clone is a distinct snapshot that no directory has published, so it
+    /// starts current whatever its source's state.
+    fn clone(&self) -> Self {
+        Self::default()
+    }
 }
 
 #[derive(Clone, Default)]
@@ -361,7 +405,9 @@ impl Acl {
                 if user.dump().len() > MAX_LINE_BYTES {
                     return acl_error("ACL user declaration exceeds size limit");
                 }
-                users.insert(name.to_owned(), Arc::new(user));
+                if let Some(previous) = users.insert(name.to_owned(), Arc::new(user)) {
+                    previous.supersede();
+                }
                 Resp::Simple("OK")
             }
             b"DELUSER" if args.len() >= 3 => {
@@ -372,8 +418,11 @@ impl Acl {
                 let mut users = self.users.write().unwrap_or_else(|e| e.into_inner());
                 let mut removed = 0;
                 for name in &args[2..] {
-                    if let Ok(name) = std::str::from_utf8(name) {
-                        removed += i64::from(users.remove(name).is_some());
+                    if let Ok(name) = std::str::from_utf8(name)
+                        && let Some(previous) = users.remove(name)
+                    {
+                        previous.supersede();
+                        removed += 1;
                     }
                 }
                 Resp::Integer(removed)
@@ -468,7 +517,11 @@ impl Acl {
                                 Arc::make_mut(user).identity = existing.identity.clone();
                             }
                         }
-                        *users = parsed;
+                        // Every loaded snapshot replaces its predecessor, even
+                        // one with unchanged rules and identity.
+                        for previous in std::mem::replace(&mut *users, parsed).values() {
+                            previous.supersede();
+                        }
                         Resp::Simple("OK")
                     }
                     Err(_) => {
@@ -637,14 +690,17 @@ impl Acl {
 impl User {
     fn empty(name: &str) -> Self {
         Self {
-            name: name.into(),
-            identity: Arc::new(()),
-            enabled: false,
-            nopass: false,
-            password_hashes: Vec::new(),
-            root: Selector::default(),
-            selectors: Vec::new(),
-            namespace_cache: Arc::default(),
+            policy: Arc::new(Policy {
+                name: name.into(),
+                identity: Arc::new(()),
+                enabled: false,
+                nopass: false,
+                password_hashes: Vec::new(),
+                root: Selector::default(),
+                selectors: Vec::new(),
+                namespace_cache: Arc::default(),
+            }),
+            superseded: Superseded::default(),
         }
     }
 
@@ -655,6 +711,18 @@ impl User {
     /// Changes to an existing user preserve identity; delete/recreate does not.
     pub fn same_identity(&self, other: &User) -> bool {
         Arc::ptr_eq(&self.identity, &other.identity)
+    }
+
+    /// True once the directory no longer publishes this snapshot. Holders of
+    /// a directory snapshot reuse it until then and must then look its name
+    /// up again; that lookup takes the directory lock, so it observes the
+    /// replacement published in the same writer critical section.
+    pub fn superseded(&self) -> bool {
+        self.superseded.0.load(Ordering::Acquire)
+    }
+
+    fn supersede(&self) {
+        self.superseded.0.store(true, Ordering::Release);
     }
 
     fn valid_commands(&self, catalog: &[String]) -> bool {
@@ -952,6 +1020,16 @@ impl User {
         )
     }
 
+    /// The root selector's only command rule is `+@all` and it grants
+    /// read-write `*` keys and `*` channels (extra patterns are moot). `check`
+    /// consults the root first and, for such a selector, returns Ok before any
+    /// glob work or audit, whatever the command, categories, keys, global
+    /// flag or channels. Derived from this immutable snapshot on each call;
+    /// like `check`, it does not consider the enabled flag.
+    pub(crate) fn unrestricted_root(&self) -> bool {
+        self.root.unrestricted()
+    }
+
     #[expect(
         clippy::too_many_arguments,
         reason = "The bounded selector proof borrows independent command, key, channel, and audit dimensions."
@@ -1209,6 +1287,19 @@ impl Selector {
             _ => return Err("unknown ACL rule or user-state rule inside selector"),
         }
         Ok(())
+    }
+
+    /// Grants every command, key access and channel by itself. A later rule,
+    /// even a positive one, disqualifies the selector so the proof stays exact.
+    fn unrestricted(&self) -> bool {
+        matches!(
+            self.command_rules.as_slice(),
+            [CommandRule {
+                allow: true,
+                target: Target::All,
+            }]
+        ) && self.universal_keys(KeyAccess::ReadWrite)
+            && self.all_channels()
     }
 
     fn command_allowed(&self, command: &[u8], categories: &[&str]) -> bool {
@@ -1799,10 +1890,9 @@ mod tests {
     fn engine_channel_authorization_is_separate_and_pattern_safe() {
         let restricted = user(b"user alice on >secret +@pubsub &allowed:*");
         let check = |user: &User, values: &[&[u8]]| {
-            crate::engine::Engine::authorize(
-                &values.iter().map(|value| key(value)).collect::<Vec<_>>(),
-                user,
-            )
+            let args = values.iter().map(|value| key(value)).collect::<Vec<_>>();
+            let mut command = crate::engine::BoundCommand::bind(&args);
+            command.check().and_then(|()| command.authorize(user, None))
         };
         assert!(check(&restricted, &[b"PUBLISH", b"allowed:x", b"body"]).is_ok());
         assert!(check(&restricted, &[b"PUBLISH", b"hidden:x", b"body"]).is_err());
@@ -1818,6 +1908,218 @@ mod tests {
         assert!(check(&keys_only, &[b"PUBLISH", b"allowed:x", b"body"]).is_err());
         let reset = user(b"user alice on >secret +@pubsub &* resetchannels &allowed:*");
         assert!(check(&reset, &[b"PUBLISH", b"hidden:x", b"body"]).is_err());
+    }
+
+    type Decision = (Result<(), Resp>, Vec<(String, Bytes)>);
+
+    /// Engine authorization through a live audit: the decision and every
+    /// denial it recorded as (reason, object).
+    fn audited(user: &User, values: &[&[u8]], admission: bool) -> Decision {
+        let log = Acl::new();
+        let clients =
+            crate::client_registry::Registry::new(Arc::new(crate::pubsub::Hub::default()));
+        let audit = Audit {
+            acl: &log,
+            clients: &clients,
+            client_id: 1,
+            context: "multi",
+        };
+        let args: Vec<_> = values.iter().map(|value| key(value)).collect();
+        let mut command = crate::engine::BoundCommand::bind(&args);
+        // MULTI admission authorizes after identity and arity only; every
+        // other caller fully validates first.
+        let result = if admission {
+            command.authorize(user, Some(&audit))
+        } else {
+            command
+                .check()
+                .and_then(|()| command.authorize(user, Some(&audit)))
+        };
+        let denials = log
+            .log
+            .lock()
+            .unwrap()
+            .entries
+            .iter()
+            .map(|entry| (entry.reason.clone(), entry.object.clone()))
+            .collect();
+        (result, denials)
+    }
+    fn granted() -> Decision {
+        (Ok(()), Vec::new())
+    }
+    fn refused(reason: &str, object: &[u8]) -> Decision {
+        (
+            Err(Resp::Error(
+                "NOPERM this user has no permissions to run this command or access its keys".into(),
+            )),
+            vec![(reason.into(), key(object))],
+        )
+    }
+
+    #[test]
+    fn validation_precedes_acl_decisions_and_admission_defers_counted_keys() {
+        let everything = Acl::new().user("default").unwrap();
+        let disabled = acl(b"user alice off >secret allcommands allkeys allchannels")
+            .user("alice")
+            .unwrap();
+        let command_limited = user(b"user alice on >secret +get ~tenant:*");
+        let keys_limited = user(b"user alice on >secret allcommands allchannels ~tenant:*");
+        let policies = [&everything, &disabled, &command_limited, &keys_limited];
+        let malformed: &[&[&[u8]]] = &[
+            &[],
+            &[b"NOPE"],
+            &[b"GET"],
+            &[b"CONFIG|GET", b"maxmemory"],
+            &[b"CONFIG", b"NOPE"],
+            &[b"CONFIG", b"GET"],
+        ];
+        for policy in policies {
+            for values in malformed {
+                let args: Vec<_> = values.iter().map(|value| key(value)).collect();
+                let admission = crate::engine::BoundCommand::bind(&args).admit();
+                assert!(admission.is_err());
+                assert_eq!(audited(policy, values, true), (admission, Vec::new()));
+                let full = crate::engine::BoundCommand::bind(&args).check();
+                assert_eq!(audited(policy, values, false), (full, Vec::new()));
+            }
+        }
+        // Invalid key counts fail full validation for everyone, yet MULTI
+        // admission still decides command and channel access without keys.
+        let counted: &[&[&[u8]]] = &[
+            &[b"CMS.MERGE", b"out", b"999999999999999999999", b"a"],
+            &[b"XREAD", b"STREAMS", b"a", b"b", b"0"],
+        ];
+        for values in counted {
+            let args: Vec<_> = values.iter().map(|value| key(value)).collect();
+            assert!(crate::engine::BoundCommand::bind(&args).admit().is_ok());
+            for policy in policies {
+                let full = crate::engine::BoundCommand::bind(&args).check();
+                assert!(full.is_err());
+                assert_eq!(audited(policy, values, false), (full, Vec::new()));
+            }
+            for policy in [&everything, &disabled, &keys_limited] {
+                assert_eq!(audited(policy, values, true), granted());
+            }
+        }
+        assert_eq!(
+            audited(&command_limited, counted[0], true),
+            refused("command", b"cms.merge")
+        );
+        assert_eq!(
+            audited(&command_limited, counted[1], true),
+            refused("command", b"xread")
+        );
+        let valid: &[&[&[u8]]] = &[
+            &[b"GET", b"k"],
+            &[b"SET", b"k", b"v"],
+            &[b"COPY", b"a", b"b"],
+            &[b"SCAN", b"0"],
+            &[b"PUBSUB", b"CHANNELS"],
+            &[b"PUBLISH", b"c", b"body"],
+            &[b"CONFIG", b"GET", b"maxmemory"],
+        ];
+        for policy in [&everything, &disabled] {
+            for values in valid {
+                for admission in [false, true] {
+                    assert_eq!(audited(policy, values, admission), granted());
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn later_rules_and_split_directional_selectors_keep_denying() {
+        let later_command = user(b"user alice on >secret +@all ~* &* -get");
+        let later_category = user(b"user alice on >secret +@all ~* &* -@write");
+        let earlier_negative = user(b"user alice on >secret -get +@all ~* &*");
+        let later_positive = user(b"user alice on >secret +@all +get ~* &*");
+        for admission in [false, true] {
+            let check = |user: &User, values: &[&[u8]]| audited(user, values, admission);
+            assert_eq!(
+                check(&later_command, &[b"GET", b"k"]),
+                refused("command", b"get")
+            );
+            assert_eq!(check(&later_command, &[b"SET", b"k", b"v"]), granted());
+            assert_eq!(
+                check(&later_category, &[b"SET", b"k", b"v"]),
+                refused("command", b"set")
+            );
+            assert_eq!(check(&later_category, &[b"GET", b"k"]), granted());
+            // +@all replaces every earlier rule.
+            assert_eq!(check(&earlier_negative, &[b"GET", b"k"]), granted());
+            assert_eq!(check(&later_positive, &[b"GET", b"k"]), granted());
+        }
+        // Read-only root plus write-only selector: each key is granted somewhere,
+        // but no single selector grants both directions of COPY.
+        let split = user(b"user alice on >secret +@all %R~* &* (+@all %W~* &*)");
+        let check = |user: &User, values: &[&[u8]]| audited(user, values, false);
+        assert_eq!(check(&split, &[b"GET", b"k"]), granted());
+        assert_eq!(check(&split, &[b"DEL", b"k"]), granted());
+        assert_eq!(check(&split, &[b"SET", b"k", b"v"]), granted());
+        assert_eq!(check(&split, &[b"COPY", b"a", b"b"]), refused("key", b"a"));
+        assert_eq!(check(&split, &[b"SCAN", b"0"]), refused("key", b"*"));
+        let read_only = user(b"user alice on >secret +@all %R~* &*");
+        assert_eq!(check(&read_only, &[b"GET", b"k"]), granted());
+        assert_eq!(check(&read_only, &[b"DEL", b"k"]), refused("key", b"k"));
+        // Both directions on `*` within one selector merge into read-write.
+        let merged = user(b"user alice on >secret +@all %R~* %W~* &*");
+        assert_eq!(check(&merged, &[b"COPY", b"a", b"b"]), granted());
+        assert_eq!(check(&merged, &[b"SCAN", b"0"]), granted());
+        let reset = user(b"user alice on >secret +@all ~* &* resetkeys ~tenant:*");
+        assert_eq!(check(&reset, &[b"GET", b"other"]), refused("key", b"other"));
+        assert_eq!(check(&reset, &[b"SCAN", b"0"]), refused("key", b"*"));
+    }
+
+    #[test]
+    fn channel_restrictions_apply_despite_universal_commands_and_keys() {
+        let limited = user(b"user alice on >secret +@all ~* &allowed:*");
+        let reset = user(b"user alice on >secret +@all ~* &* resetchannels");
+        let restored = user(b"user alice on >secret +@all ~* &* resetchannels &*");
+        for admission in [false, true] {
+            let check = |user: &User, values: &[&[u8]]| audited(user, values, admission);
+            assert_eq!(
+                check(&limited, &[b"PUBLISH", b"allowed:x", b"body"]),
+                granted()
+            );
+            assert_eq!(
+                check(&limited, &[b"PUBLISH", b"hidden:x", b"body"]),
+                refused("channel", b"hidden:x")
+            );
+            assert_eq!(
+                check(&limited, &[b"SUBSCRIBE", b"allowed:a", b"hidden:b"]),
+                refused("channel", b"hidden:b")
+            );
+            assert_eq!(
+                check(&limited, &[b"PUBSUB", b"CHANNELS"]),
+                refused("channel", b"*")
+            );
+            assert_eq!(check(&limited, &[b"GET", b"k"]), granted());
+            assert_eq!(
+                check(&reset, &[b"PUBLISH", b"c", b"body"]),
+                refused("channel", b"c")
+            );
+            assert_eq!(check(&restored, &[b"PUBSUB", b"CHANNELS"]), granted());
+        }
+    }
+
+    #[test]
+    fn root_work_limit_is_not_bypassed_by_a_later_unrestricted_selector() {
+        let user = user(b"user alice on >secret +get ~tenant:* (+@all ~* &*)");
+        let huge = vec![b'a'; MAX_GLOB_WORK];
+        for admission in [false, true] {
+            // The root grants GET, so its key match runs first and exhausts
+            // the shared budget before the unrestricted selector is reached.
+            assert_eq!(
+                audited(&user, &[b"GET", huge.as_slice()], admission),
+                refused("key", &huge[..MAX_PATTERN_BYTES])
+            );
+            assert_eq!(audited(&user, &[b"GET", b"other"], admission), granted());
+            assert_eq!(
+                audited(&user, &[b"SET", huge.as_slice(), b"v"], admission),
+                granted()
+            );
+        }
     }
 
     #[test]

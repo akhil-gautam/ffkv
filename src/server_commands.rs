@@ -12,7 +12,10 @@ use std::{
     io,
     path::{Path, PathBuf},
     pin::Pin,
-    sync::{Arc, Mutex, RwLock},
+    sync::{
+        Arc, Mutex, RwLock,
+        atomic::{AtomicBool, Ordering},
+    },
     time::{Instant, SystemTime, UNIX_EPOCH},
 };
 pub use telemetry::{Observation, thread_cpu_time};
@@ -179,10 +182,72 @@ impl Default for PersistenceStats {
     }
 }
 
+/// Commands this runtime intercepts, classified once per root registration by
+/// the engine registry ([`crate::engine::BoundCommand::server_command`]).
+/// Subcommand, arity and syntax errors stay with each arm's dispatch.
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum ServerCommand {
+    Time,
+    LastSave,
+    Role,
+    Info,
+    Save,
+    BgSave,
+    BgRewriteAof,
+    Backup,
+    Config,
+    Debug,
+    Memory,
+    Latency,
+    Slowlog,
+    Hotkeys,
+    Monitor,
+    Shutdown,
+    Lolwut,
+    Module,
+}
+impl ServerCommand {
+    /// Classifies static registrations and cold direct-runtime invocations.
+    pub(crate) fn of(name: &[u8]) -> Option<Self> {
+        Some(match name {
+            name if name.eq_ignore_ascii_case(b"time") => Self::Time,
+            name if name.eq_ignore_ascii_case(b"lastsave") => Self::LastSave,
+            name if name.eq_ignore_ascii_case(b"role") => Self::Role,
+            name if name.eq_ignore_ascii_case(b"info") => Self::Info,
+            name if name.eq_ignore_ascii_case(b"save") => Self::Save,
+            name if name.eq_ignore_ascii_case(b"bgsave") => Self::BgSave,
+            name if name.eq_ignore_ascii_case(b"bgrewriteaof") => Self::BgRewriteAof,
+            name if name.eq_ignore_ascii_case(b"backup") => Self::Backup,
+            name if name.eq_ignore_ascii_case(b"config") => Self::Config,
+            name if name.eq_ignore_ascii_case(b"debug") => Self::Debug,
+            name if name.eq_ignore_ascii_case(b"memory") => Self::Memory,
+            name if name.eq_ignore_ascii_case(b"latency") => Self::Latency,
+            name if name.eq_ignore_ascii_case(b"slowlog") => Self::Slowlog,
+            name if name.eq_ignore_ascii_case(b"hotkeys") => Self::Hotkeys,
+            name if name.eq_ignore_ascii_case(b"monitor") => Self::Monitor,
+            name if name.eq_ignore_ascii_case(b"shutdown") => Self::Shutdown,
+            name if name.eq_ignore_ascii_case(b"lolwut") => Self::Lolwut,
+            name if name.eq_ignore_ascii_case(b"module") => Self::Module,
+            _ => return None,
+        })
+    }
+}
+
+/// Whether a HOTKEYS session may be tracking, on its own cache line: every
+/// command's CPU window reads it, while the telemetry lock is written by every
+/// delivery.
+#[repr(align(128))]
+#[derive(Default)]
+struct CpuObserved(AtomicBool);
+
 pub struct ServerRuntime {
     config: RwLock<ConfigSnapshot>,
     hooks: Arc<dyn ServerHooks>,
     telemetry: Mutex<telemetry::Telemetry>,
+    /// Written only under `telemetry`. Set before any HOTKEYS command runs,
+    /// so a starting session measures every CPU window that begins after its
+    /// start time and process CPU snapshot; cleared once no session tracks.
+    cpu_observed: CpuObserved,
     persistence: RwLock<PersistenceStats>,
     monitor: broadcast::Sender<Bytes>,
     extensions: Arc<extensions::Extensions>,
@@ -192,9 +257,10 @@ impl ServerRuntime {
     pub fn new(config: ConfigSnapshot, hooks: Arc<dyn ServerHooks>) -> Self {
         let (monitor, _) = broadcast::channel(1024);
         Self {
+            telemetry: Mutex::new(telemetry::Telemetry::new(&config)),
+            cpu_observed: CpuObserved::default(),
             config: RwLock::new(config),
             hooks,
-            telemetry: Mutex::new(telemetry::Telemetry::new()),
             persistence: RwLock::new(PersistenceStats::default()),
             monitor,
             extensions: Arc::new(extensions::Extensions::new()),
@@ -210,6 +276,19 @@ impl ServerRuntime {
     pub fn monitor(&self) -> broadcast::Receiver<Bytes> {
         self.monitor.subscribe()
     }
+    /// Whether a HOTKEYS session may report command CPU time. Commands
+    /// measure their thread CPU windows only while this or another reporter
+    /// (`State::cpu_observed`) may read them.
+    pub fn cpu_observed(&self) -> bool {
+        self.cpu_observed.0.load(Ordering::Relaxed)
+    }
+    /// Republishes `cpu_observed` from `telemetry`, held by the caller.
+    fn publish_cpu_observed(&self, telemetry: &telemetry::Telemetry) {
+        let active = telemetry.hotkeys_active();
+        if self.cpu_observed.0.load(Ordering::Relaxed) != active {
+            self.cpu_observed.0.store(active, Ordering::Relaxed);
+        }
+    }
     pub fn record_persistence(&self, stats: PersistenceStats) {
         *self.persistence.write().unwrap_or_else(|p| p.into_inner()) = stats;
     }
@@ -219,17 +298,27 @@ impl ServerRuntime {
             .unwrap_or_else(|p| p.into_inner())
             .reset_statistics();
     }
-    pub fn observe(&self, observation: Observation<'_>) {
-        let config = self.config.read().unwrap_or_else(|p| p.into_inner());
-        if self.monitor.receiver_count() != 0
-            && crate::engine::Engine::monitor_allowed(observation.args)
-        {
-            let _ = self.monitor.send(telemetry::monitor_line(&observation));
+    /// Observes the commands one flush delivered, in delivery order: their
+    /// MONITOR lines first, outside the telemetry lock, then every observation
+    /// under one telemetry lock, so they all adopt the same configuration
+    /// publication. Keys a caller must resolve (dynamic modules) are resolved
+    /// before this call; builtin HOTKEYS keys may still be derived inside.
+    /// Takes no configuration lock: telemetry holds typed copies of the
+    /// observation parameters, refreshed by each configuration publication.
+    pub fn observe(&self, observations: &[Observation<'_>]) {
+        if self.monitor.receiver_count() != 0 {
+            for observation in observations {
+                if crate::engine::BoundCommand::bind(observation.args).monitor_allowed() {
+                    let _ = self.monitor.send(telemetry::monitor_line(observation));
+                }
+            }
         }
-        self.telemetry
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .observe(observation, &config);
+        let mut telemetry = self.telemetry.lock().unwrap_or_else(|p| p.into_inner());
+        for observation in observations {
+            telemetry.observe(observation);
+        }
+        // An observation may notice a session's duration ended.
+        self.publish_cpu_observed(&telemetry);
     }
     pub fn config_snapshot(&self) -> ConfigSnapshot {
         self.config
@@ -240,6 +329,8 @@ impl ServerRuntime {
     pub(crate) fn local_parameter(name: &str) -> bool {
         telemetry::runtime_parameter(name)
     }
+    /// Lock order is configuration, then telemetry: observations adopt the
+    /// whole publication before it is released and CONFIG SET replies.
     pub(crate) fn publish_configuration(&self, changes: Vec<(String, Bytes)>) {
         let mut config = self.config.write().unwrap_or_else(|p| p.into_inner());
         for (name, value) in changes {
@@ -249,6 +340,10 @@ impl ServerRuntime {
                 .expect("validated configuration")
                 .value = value;
         }
+        self.telemetry
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .configure(&config);
     }
     pub(crate) fn config_number(&self, name: &str, default: i64) -> i64 {
         self.config
@@ -267,23 +362,32 @@ impl ServerRuntime {
     }
     /// Caller must authorize first, including all administrative commands. Dynamic
     /// extensions require prepare/authorize/execute rather than this trusted path.
-    pub async fn execute(&self, args: &[Bytes], context: CommandContext) -> Option<Resp> {
-        self.execute_with_hooks(args, context, self.hooks.as_ref())
+    /// `None` when `command` is not a server command.
+    pub(crate) async fn execute(
+        &self,
+        command: &crate::engine::BoundCommand<'_>,
+        context: CommandContext,
+    ) -> Option<Resp> {
+        self.execute_with_hooks(command, context, self.hooks.as_ref())
             .await
     }
     pub(crate) async fn execute_with_hooks(
         &self,
-        args: &[Bytes],
+        command: &crate::engine::BoundCommand<'_>,
         context: CommandContext,
         hooks: &dyn ServerHooks,
     ) -> Option<Resp> {
-        let name = args.first()?;
-        if name.eq_ignore_ascii_case(b"MODULE") {
-            return self.extensions.execute(args).await;
-        }
-        let command = String::from_utf8_lossy(name).to_ascii_uppercase();
-        let reply = match command.as_str() {
-            "TIME" if args.len() == 1 => {
+        let args = command.args();
+        let kind = match command.server_command() {
+            Some(kind) => kind,
+            // Trusted direct callers can use controls absent from the wire
+            // registry. Preserve their dispatch without registering new commands.
+            None if command.root_name().is_none() => ServerCommand::of(args.first()?)?,
+            None => return None,
+        };
+        let reply = match kind {
+            ServerCommand::Module => return self.extensions.execute(args).await,
+            ServerCommand::Time if args.len() == 1 => {
                 let elapsed = SystemTime::now()
                     .duration_since(UNIX_EPOCH)
                     .unwrap_or_default();
@@ -292,18 +396,18 @@ impl ServerRuntime {
                     bulk(elapsed.subsec_micros().to_string()),
                 ])
             }
-            "TIME" => arity("time"),
-            "LASTSAVE" if args.len() == 1 => Resp::Integer(
+            ServerCommand::Time => arity("time"),
+            ServerCommand::LastSave if args.len() == 1 => Resp::Integer(
                 self.persistence
                     .read()
                     .unwrap_or_else(|p| p.into_inner())
                     .last_save_time,
             ),
-            "LASTSAVE" => arity("lastsave"),
-            "ROLE" if args.len() == 1 => Self::action(hooks, ServerAction::Role).await,
-            "ROLE" => arity("role"),
-            "INFO" => self.info(args, hooks).await,
-            "SAVE" if args.len() == 1 => {
+            ServerCommand::LastSave => arity("lastsave"),
+            ServerCommand::Role if args.len() == 1 => Self::action(hooks, ServerAction::Role).await,
+            ServerCommand::Role => arity("role"),
+            ServerCommand::Info => self.info(args, hooks).await,
+            ServerCommand::Save if args.len() == 1 => {
                 Self::action(
                     hooks,
                     ServerAction::Save {
@@ -313,8 +417,8 @@ impl ServerRuntime {
                 )
                 .await
             }
-            "SAVE" => arity("save"),
-            "BGSAVE"
+            ServerCommand::Save => arity("save"),
+            ServerCommand::BgSave
                 if args.len() == 1
                     || args.len() == 2 && args[1].eq_ignore_ascii_case(b"SCHEDULE") =>
             {
@@ -327,14 +431,14 @@ impl ServerRuntime {
                 )
                 .await
             }
-            "BGSAVE" => syntax(),
-            "BGREWRITEAOF" if args.len() == 1 => {
+            ServerCommand::BgSave => syntax(),
+            ServerCommand::BgRewriteAof if args.len() == 1 => {
                 Self::action(hooks, ServerAction::RewriteAof).await
             }
-            "BGREWRITEAOF" => arity("bgrewriteaof"),
-            "BACKUP" => self.backup(args, hooks).await,
-            "CONFIG" => self.configure(args, hooks).await,
-            "DEBUG" => {
+            ServerCommand::BgRewriteAof => arity("bgrewriteaof"),
+            ServerCommand::Backup => self.backup(args, hooks).await,
+            ServerCommand::Config => self.configure(args, hooks).await,
+            ServerCommand::Debug => {
                 Self::action(
                     hooks,
                     ServerAction::Debug(
@@ -346,18 +450,18 @@ impl ServerRuntime {
                 )
                 .await
             }
-            "MEMORY" => self.memory(args, context.database, hooks).await,
-            "LATENCY" => self
+            ServerCommand::Memory => self.memory(args, context.database, hooks).await,
+            ServerCommand::Latency => self
                 .telemetry
                 .lock()
                 .unwrap_or_else(|p| p.into_inner())
                 .latency_command(args),
-            "SLOWLOG" => self
+            ServerCommand::Slowlog => self
                 .telemetry
                 .lock()
                 .unwrap_or_else(|p| p.into_inner())
                 .slowlog_command(args),
-            "HOTKEYS" => {
+            ServerCommand::Hotkeys => {
                 let cluster = self
                     .config
                     .read()
@@ -365,15 +469,19 @@ impl ServerRuntime {
                     .parameters
                     .get("cluster-enabled")
                     .is_some_and(|p| p.value.eq_ignore_ascii_case(b"yes"));
-                self.telemetry
-                    .lock()
-                    .unwrap_or_else(|p| p.into_inner())
-                    .hotkeys_command(args, cluster)
+                let mut telemetry = self.telemetry.lock().unwrap_or_else(|p| p.into_inner());
+                // Raised before a session can start, so no CPU window that
+                // begins after its start time and process CPU snapshot goes
+                // unmeasured; settled to the outcome before the lock drops.
+                self.cpu_observed.0.store(true, Ordering::Relaxed);
+                let reply = telemetry.hotkeys_command(args, cluster);
+                self.publish_cpu_observed(&telemetry);
+                reply
             }
-            "MONITOR" if args.len() == 1 => Resp::Simple("OK"),
-            "MONITOR" => arity("monitor"),
-            "SHUTDOWN" => self.shutdown(args, hooks).await,
-            "LOLWUT" => {
+            ServerCommand::Monitor if args.len() == 1 => Resp::Simple("OK"),
+            ServerCommand::Monitor => arity("monitor"),
+            ServerCommand::Shutdown => self.shutdown(args, hooks).await,
+            ServerCommand::Lolwut => {
                 if !(args.len() == 1
                     || args.len() == 3
                         && args[1].eq_ignore_ascii_case(b"VERSION")
@@ -387,7 +495,6 @@ impl ServerRuntime {
                     ))
                 }
             }
-            _ => return None,
         };
         Some(reply)
     }
@@ -722,5 +829,271 @@ pub(super) fn unsigned(bytes: &[u8]) -> Option<u64> {
         None
     } else {
         std::str::from_utf8(bytes).ok()?.parse().ok()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+
+    struct NoHooks;
+    impl ServerHooks for NoHooks {
+        fn run<'a>(&'a self, action: ServerAction) -> HookFuture<'a> {
+            panic!("non-hook command dispatched a server action: {action:?}");
+        }
+    }
+
+    async fn execute(runtime: &ServerRuntime, args: &[&[u8]]) -> Option<Resp> {
+        let args: Vec<Bytes> = args.iter().map(|arg| Bytes::copy_from_slice(arg)).collect();
+        let command = crate::engine::BoundCommand::bind(&args);
+        runtime
+            .execute(&command, CommandContext { database: 0 })
+            .await
+    }
+
+    fn observe(runtime: &ServerRuntime, command: &[u8], elapsed: Duration) {
+        let args = [Bytes::copy_from_slice(command)];
+        runtime.observe(&[Observation {
+            args: &args,
+            keys: Some(&[]),
+            database: 0,
+            client_address: "127.0.0.1:1",
+            client_name: b"",
+            elapsed,
+            cpu_time: Duration::ZERO,
+            input_bytes: 0,
+            output_bytes: 0,
+            failed: false,
+        }]);
+    }
+
+    /// Publishes validated changes as the actor does after CONFIG SET.
+    fn configure(runtime: &ServerRuntime, changes: &[(&str, &str)]) {
+        runtime.publish_configuration(
+            changes
+                .iter()
+                .map(|&(name, value)| (name.to_owned(), Bytes::copy_from_slice(value.as_bytes())))
+                .collect(),
+        );
+    }
+
+    /// `LATENCY HISTOGRAM get` calls, or `None` without that histogram.
+    async fn get_calls(runtime: &ServerRuntime) -> Option<i64> {
+        let reply = execute(runtime, &[b"LATENCY", b"HISTOGRAM", b"get"]).await;
+        let Some(Resp::Map(histograms)) = reply else {
+            panic!("histogram reply {reply:?}");
+        };
+        match histograms.as_slice() {
+            [] => None,
+            [(name, Resp::Map(detail))] if *name == bulk("get") => match detail.first() {
+                Some((_, Resp::Integer(calls))) => Some(*calls),
+                other => panic!("histogram calls {other:?}"),
+            },
+            other => panic!("histograms {other:?}"),
+        }
+    }
+
+    /// Worst latency the monitor recorded for the `command` event, if any.
+    async fn worst_command_latency(runtime: &ServerRuntime) -> Option<i64> {
+        let reply = execute(runtime, &[b"LATENCY", b"LATEST"]).await;
+        let Some(Resp::Array(Some(events))) = reply else {
+            panic!("latency reply {reply:?}");
+        };
+        match events.as_slice() {
+            [] => None,
+            [Resp::Array(Some(event))] => match event.as_slice() {
+                [name, _, _, Resp::Integer(worst)] if *name == bulk("command") => Some(*worst),
+                other => panic!("latency event {other:?}"),
+            },
+            other => panic!("latency events {other:?}"),
+        }
+    }
+
+    /// Logged command names from `SLOWLOG GET -1`, newest first.
+    async fn slowlog(runtime: &ServerRuntime) -> Vec<String> {
+        let reply = execute(runtime, &[b"SLOWLOG", b"GET", b"-1"]).await;
+        let Some(Resp::Array(Some(entries))) = reply else {
+            panic!("slowlog reply {reply:?}");
+        };
+        entries
+            .iter()
+            .map(|entry| {
+                if let Resp::Array(Some(fields)) = entry
+                    && let Some(Resp::Array(Some(args))) = fields.get(3)
+                    && let [Resp::Bulk(Some(command))] = args.as_slice()
+                {
+                    String::from_utf8(command.to_vec()).unwrap()
+                } else {
+                    panic!("slowlog entry {entry:?}");
+                }
+            })
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn builtin_names_match_ascii_case_insensitively() {
+        let runtime = ServerRuntime::new(ConfigSnapshot::default(), Arc::new(NoHooks));
+        assert_eq!(
+            execute(&runtime, &[b"bgrewriteaof", b"now"]).await,
+            Some(arity("bgrewriteaof"))
+        );
+        assert_eq!(
+            execute(&runtime, &[b"mOnItOr"]).await,
+            Some(Resp::Simple("OK"))
+        );
+        assert_eq!(
+            execute(&runtime, &[b"Time", b"extra"]).await,
+            Some(arity("time"))
+        );
+    }
+
+    #[tokio::test]
+    async fn non_builtin_names_fall_through_without_running_hooks() {
+        let runtime = ServerRuntime::new(ConfigSnapshot::default(), Arc::new(NoHooks));
+        let long = vec![b'S'; 4096];
+        for name in [
+            b"BGREWRITEAOFX".as_slice(),
+            b"BGREWRITEAO",
+            b"TIME\xff",
+            b"\xffTIME",
+            "tıme".as_bytes(),
+            b"T\0IME",
+            b"",
+            b"GET",
+            long.as_slice(),
+        ] {
+            assert_eq!(execute(&runtime, &[name]).await, None, "{name:?}");
+        }
+        assert_eq!(execute(&runtime, &[]).await, None);
+    }
+
+    #[tokio::test]
+    async fn published_latency_settings_govern_later_observations_across_statistics_resets() {
+        let runtime = ServerRuntime::new(ConfigSnapshot::default(), Arc::new(NoHooks));
+        let ms = Duration::from_millis;
+        observe(&runtime, b"GET", ms(50));
+        assert_eq!(get_calls(&runtime).await, Some(1));
+        assert_eq!(worst_command_latency(&runtime).await, None);
+
+        configure(
+            &runtime,
+            &[
+                ("latency-tracking", "no"),
+                ("latency-monitor-threshold", "7"),
+            ],
+        );
+        // CONFIG RESETSTAT clears statistics, never the published settings.
+        runtime.reset_statistics();
+        observe(&runtime, b"GET", ms(6));
+        assert_eq!(worst_command_latency(&runtime).await, None);
+        observe(&runtime, b"GET", ms(7));
+        assert_eq!(worst_command_latency(&runtime).await, Some(7));
+        assert_eq!(get_calls(&runtime).await, None);
+
+        configure(
+            &runtime,
+            &[
+                ("latency-tracking", "yes"),
+                ("latency-monitor-threshold", "0"),
+            ],
+        );
+        observe(&runtime, b"GET", ms(50));
+        assert_eq!(get_calls(&runtime).await, Some(1));
+        assert_eq!(worst_command_latency(&runtime).await, Some(7));
+    }
+
+    #[tokio::test]
+    async fn slowlog_threshold_is_inclusive_and_length_trims_at_the_next_observation() {
+        let runtime = ServerRuntime::new(ConfigSnapshot::default(), Arc::new(NoHooks));
+        let us = Duration::from_micros;
+        configure(
+            &runtime,
+            &[("slowlog-log-slower-than", "100"), ("slowlog-max-len", "3")],
+        );
+        for (command, elapsed) in [(b"A", 99), (b"B", 100), (b"C", 101), (b"D", 100)] {
+            observe(&runtime, command, us(elapsed));
+        }
+        assert_eq!(slowlog(&runtime).await, ["D", "C", "B"]);
+
+        configure(&runtime, &[("slowlog-max-len", "1")]);
+        assert_eq!(slowlog(&runtime).await, ["D", "C", "B"]);
+        observe(&runtime, b"E", us(0));
+        assert_eq!(slowlog(&runtime).await, ["D"]);
+
+        configure(
+            &runtime,
+            &[("slowlog-log-slower-than", "-1"), ("slowlog-max-len", "2")],
+        );
+        observe(&runtime, b"F", Duration::from_secs(1));
+        assert_eq!(slowlog(&runtime).await, ["D"]);
+
+        configure(
+            &runtime,
+            &[("slowlog-log-slower-than", "0"), ("slowlog-max-len", "0")],
+        );
+        observe(&runtime, b"G", us(0));
+        assert!(slowlog(&runtime).await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_delivered_batch_reaches_monitor_and_the_slow_log_in_delivery_order() {
+        let runtime = ServerRuntime::new(ConfigSnapshot::default(), Arc::new(NoHooks));
+        configure(&runtime, &[("slowlog-log-slower-than", "0")]);
+        let mut monitor = runtime.monitor();
+        let commands: [&[&str]; 3] = [&["GET", "k"], &["SET", "k", "v"], &["PING"]];
+        let commands = commands.map(|args| {
+            args.iter()
+                .map(|arg| Bytes::copy_from_slice(arg.as_bytes()))
+                .collect::<Vec<_>>()
+        });
+        let names: [&[u8]; 3] = [b"first", b"\xffsecond", b""];
+        let observations: Vec<Observation<'_>> = commands
+            .iter()
+            .zip(names)
+            .map(|(args, client_name)| Observation {
+                args,
+                keys: None,
+                database: 0,
+                client_address: "127.0.0.1:1",
+                client_name,
+                elapsed: Duration::ZERO,
+                cpu_time: Duration::ZERO,
+                input_bytes: 0,
+                output_bytes: 0,
+                failed: false,
+            })
+            .collect();
+        runtime.observe(&observations);
+        let lines: [&[u8]; 3] = [b" \"GET\" \"k\"", b" \"SET\" \"k\" \"v\"", b" \"PING\""];
+        for expected in lines {
+            let line = monitor.try_recv().expect("a MONITOR line per command");
+            assert!(line.ends_with(expected), "{line:?}");
+        }
+        assert!(monitor.try_recv().is_err());
+
+        let reply = execute(&runtime, &[b"SLOWLOG", b"GET", b"-1"]).await;
+        let Some(Resp::Array(Some(entries))) = reply else {
+            panic!("slowlog reply {reply:?}");
+        };
+        let logged: Vec<(Resp, Resp)> = entries
+            .into_iter()
+            .map(|entry| match entry {
+                Resp::Array(Some(mut fields)) if fields.len() == 6 => {
+                    let name = fields.pop().unwrap();
+                    (fields.swap_remove(3), name)
+                }
+                other => panic!("slowlog entry {other:?}"),
+            })
+            .collect();
+        let command = |args: &[&str]| array(args.iter().map(|arg| bulk(arg.to_string())).collect());
+        assert_eq!(
+            logged,
+            [
+                (command(&["PING"]), bulk("")),
+                (command(&["SET", "k", "v"]), bulk("\u{FFFD}second")),
+                (command(&["GET", "k"]), bulk("first")),
+            ]
+        );
     }
 }

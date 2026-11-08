@@ -5,9 +5,12 @@ use std::{
         Arc, Mutex,
         atomic::{AtomicBool, AtomicU8, AtomicU32, AtomicU64, Ordering},
     },
+    time::Duration,
 };
 
 use bytes::Bytes;
+
+use crate::server_commands::thread_cpu_time;
 
 pub(crate) type HashFieldsets = Mutex<HashMap<Bytes, Arc<[Bytes]>>>;
 
@@ -55,6 +58,25 @@ impl ClientSession {
 
     pub fn set_database(&self, database: u32) {
         self.database.store(database, Ordering::Release);
+    }
+
+    /// Starts a CPU window to charge to `session` on this thread: a thread
+    /// CPU reading when `observed` (see `State::cpu_observed`) and there is a
+    /// session to charge, else nothing, so no clock is read.
+    pub fn cpu_window(session: Option<&Self>, observed: bool) -> Option<Duration> {
+        (observed && session.is_some()).then(thread_cpu_time)
+    }
+
+    /// Charges the CPU this thread spent since `start`, a [`Self::cpu_window`]
+    /// reading taken on this thread; an unmeasured window charges nothing.
+    pub fn charge_cpu(&self, start: Option<Duration>) {
+        if let Some(start) = start {
+            let spent = thread_cpu_time().saturating_sub(start);
+            self.cpu_ns.fetch_add(
+                spent.as_nanos().min(u128::from(u64::MAX)) as u64,
+                Ordering::Relaxed,
+            );
+        }
     }
 
     pub fn reset(&self) {

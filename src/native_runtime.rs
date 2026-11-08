@@ -9,7 +9,7 @@
 use crate::engine::{SearchMigrationFilter, SearchMigrationImport};
 use crate::{
     cluster::{self, ClusterFuture, ClusterHooks, ClusterKey, ClusterPage, ReplicationProgress},
-    engine::{Engine, Execution},
+    engine::{BoundCommand, Engine, Execution},
     journal::{Batch, Mutation},
     native_replication::{
         self, Applied, Backend, BackendFuture, NativeReplication, Snapshot, SnapshotRequest,
@@ -118,6 +118,9 @@ impl Config {
             announce_ip: Some(options.bind.ip().to_string()),
             io_timeout: Duration::from_millis(options.replica_timeout_ms),
             reconnect_delay: Duration::from_millis(options.replica_interval_ms),
+            // Only fresh ephemeral memory servers: cluster mode and snapshot
+            // polling replicas are validated to require a data directory.
+            lazy_history: options.data_dir.is_none(),
             aof_enabled,
             allow_loopback: options.native_replication_allow_loopback,
             allow_private: options.cluster_enabled,
@@ -218,7 +221,7 @@ impl Runtime {
                 let Ok(_generation) = native.generation_guard(generation).await else {
                     continue;
                 };
-                if let Ok(offset) = runtime
+                if let Ok(Some(offset)) = runtime
                     .send(|reply| Control::Sync { generation, reply })
                     .await
                     && native.generation() == generation
@@ -263,9 +266,11 @@ pub enum Control {
         generation: u64,
         reply: oneshot::Sender<io::Result<Applied>>,
     },
+    /// Replies with the replica stream offset a real fsync made durable, or
+    /// `None` when none can be claimed (AOF off or the fixture gate closed).
     Sync {
         generation: u64,
-        reply: oneshot::Sender<io::Result<u64>>,
+        reply: oneshot::Sender<io::Result<Option<u64>>>,
     },
     Keys {
         slot: u16,
@@ -359,7 +364,8 @@ pub struct ReplayState {
     transaction: Option<Vec<Vec<Bytes>>>,
     queued_bytes: usize,
     committed_offset: u64,
-    fsynced_offset: u64,
+    /// `None` until a real fsync covers part of this generation's stream.
+    fsynced_offset: Option<u64>,
     pub fsync_gate: Option<PathBuf>,
     source_search: Option<(Vec<(u16, u16)>, SearchMigrationFilter)>,
     destination_search: Option<(Vec<(u16, u16)>, SearchMigrationImport)>,
@@ -379,7 +385,7 @@ impl ReplayState {
             self.transaction = None;
             self.queued_bytes = 0;
             self.committed_offset = 0;
-            self.fsynced_offset = 0;
+            self.fsynced_offset = None;
         }
     }
     fn gate_closed(&self) -> io::Result<bool> {
@@ -1180,11 +1186,10 @@ async fn install(
         context.replay.transaction = None;
         context.replay.queued_bytes = 0;
         context.replay.committed_offset = offset;
-        let fsynced = if context.persistence.enabled() && !gate_closed {
-            offset
-        } else {
-            0
-        };
+        // The replacement checkpoint above is durable only with AOF on; the
+        // fixture gate withholds the claim. Never report the image at a numeric
+        // default: a snapshot at offset zero may carry data.
+        let fsynced = (context.persistence.enabled() && !gate_closed).then_some(offset);
         context.replay.fsynced_offset = fsynced;
         native(context.state)?.commit_snapshot_position(history, offset, fsynced, generation)?;
         Ok(Applied {
@@ -1289,7 +1294,7 @@ fn prepare_replay(commands: Vec<Vec<Bytes>>, initial_database: u32) -> io::Resul
             {
                 prepared.all_keys = true;
             } else {
-                for key in Engine::accessed_keys(&command) {
+                for key in BoundCommand::bind(&command).accessed_keys() {
                     prepared.keys.entry(database).or_default().insert(key);
                 }
             }
@@ -1468,12 +1473,13 @@ async fn apply(
                         },
                     );
                 } else {
-                    if Engine::is_control(&command) {
+                    let mut bound = BoundCommand::bind(&command);
+                    if bound.is_control() {
                         return Err(invalid(
                             "control command is forbidden in trusted replication data stream",
                         ));
                     }
-                    match engine.execute_at_time(&command, 0)? {
+                    match engine.execute_at_time(&mut bound, 0)? {
                         Execution::Reply(reply) => reply_result(reply)?,
                         Execution::Pushed { reply, .. } => reply_result(reply)?,
                         Execution::Block(_) | Execution::StreamBlock(_) => {
@@ -1582,28 +1588,28 @@ async fn apply(
 async fn finish_apply(context: &mut Context<'_>, end_offset: u64) -> io::Result<Applied> {
     if context.persistence.enabled() && !context.replay.gate_closed()? {
         context.persistence.finish().await?;
-        context.replay.fsynced_offset = end_offset;
+        context.replay.fsynced_offset = Some(end_offset);
     }
     Ok(Applied {
         fsynced_offset: context
             .replay
             .fsynced_offset
-            .min(context.replay.committed_offset),
+            .map(|fsynced| fsynced.min(context.replay.committed_offset)),
     })
 }
-async fn sync(context: &mut Context<'_>, generation: u64) -> io::Result<u64> {
+async fn sync(context: &mut Context<'_>, generation: u64) -> io::Result<Option<u64>> {
     check_generation(context.state, generation)?;
     if context.replay.generation != Some(generation)
         || !context.persistence.enabled()
         || context.replay.gate_closed()?
     {
-        return Ok(0);
+        return Ok(None);
     }
-    if context.replay.fsynced_offset == context.replay.committed_offset {
+    if context.replay.fsynced_offset == Some(context.replay.committed_offset) {
         return Ok(context.replay.fsynced_offset);
     }
     context.persistence.finish().await?;
-    context.replay.fsynced_offset = context.replay.committed_offset;
+    context.replay.fsynced_offset = Some(context.replay.committed_offset);
     Ok(context.replay.fsynced_offset)
 }
 
@@ -1819,7 +1825,10 @@ async fn delete_paused(
     for engine in &mut paused.engines {
         engine.set_recording(true);
         if ranges.is_none() {
-            match engine.execute_at_time(&[Bytes::from_static(b"FLUSHALL")], now)? {
+            match engine.execute_at_time(
+                &mut BoundCommand::bind(&[Bytes::from_static(b"FLUSHALL")]),
+                now,
+            )? {
                 Execution::Reply(reply) => reply_result(reply)?,
                 _ => return Err(invalid("invalid cluster clearing reply")),
             }
@@ -1844,7 +1853,7 @@ async fn delete_paused(
             let mut command = Vec::with_capacity(keys.len() + 1);
             command.push(Bytes::from_static(b"DEL"));
             command.extend(keys);
-            match engine.execute_at_time(&command, now)? {
+            match engine.execute_at_time(&mut BoundCommand::bind(&command), now)? {
                 Execution::Reply(reply) => reply_result(reply)?,
                 _ => return Err(invalid("invalid cluster deletion reply")),
             }
@@ -2083,12 +2092,12 @@ fn collect_migration_clear(
         }
         let mut command = vec![Bytes::from_static(b"DEL")];
         command.extend(keys);
-        execute_migration_command(engine, &command, combined)?;
+        execute_migration_command(engine, &mut BoundCommand::bind(&command), combined)?;
     }
 }
 fn execute_migration_command(
     engine: &mut Engine,
-    command: &[Bytes],
+    command: &mut BoundCommand<'_>,
     combined: &mut Option<Batch>,
 ) -> io::Result<()> {
     match engine.execute_at_time(command, 0)? {
@@ -2301,11 +2310,16 @@ async fn apply_changes_transaction(
                         .filter(|key| in_ranges(cluster::key_slot(key), ranges)),
                 );
                 if filtered.len() > 1 {
-                    execute_migration_command(&mut engine, &filtered, &mut combined)?;
+                    execute_migration_command(
+                        &mut engine,
+                        &mut BoundCommand::bind(&filtered),
+                        &mut combined,
+                    )?;
                 }
                 continue;
             }
-            let keys = Engine::accessed_keys(&command);
+            let mut bound = BoundCommand::bind(&command);
+            let keys = bound.accessed_keys();
             if keys.is_empty() {
                 return Err(invalid(
                     "unexpected keyless command in migration data stream",
@@ -2321,7 +2335,7 @@ async fn apply_changes_transaction(
             if selected != keys.len() {
                 return Err(invalid("cross-slot command in migration data stream"));
             }
-            execute_migration_command(&mut engine, &command, &mut combined)?;
+            execute_migration_command(&mut engine, &mut bound, &mut combined)?;
         }
         Ok(())
     })();
@@ -2395,7 +2409,9 @@ fn committed_paused_position(
         .map(|(history, offset)| native_replication::CommittedPosition {
             history,
             offset,
-            fsynced_offset: persistence.last_fsynced_native_offset().min(offset),
+            fsynced_offset: persistence
+                .last_fsynced_native_offset()
+                .map(|fsynced| fsynced.min(offset)),
         })
 }
 
@@ -2677,6 +2693,7 @@ mod tests {
                 announce_ip: None,
                 io_timeout: Duration::from_secs(1),
                 reconnect_delay: Duration::from_millis(10),
+                lazy_history: false,
                 aof_enabled: false,
                 allow_loopback: true,
                 allow_private: true,
@@ -2695,7 +2712,10 @@ mod tests {
                 .iter()
                 .map(|arg| Bytes::copy_from_slice(arg.as_bytes()))
                 .collect();
-            match engine.execute_at_time(&args, now).unwrap() {
+            match engine
+                .execute_at_time(&mut BoundCommand::bind(&args), now)
+                .unwrap()
+            {
                 crate::engine::Execution::Reply(reply)
                 | crate::engine::Execution::Pushed { reply, .. } => reply,
                 _ => panic!("unexpected blocking command"),
@@ -2762,7 +2782,7 @@ mod tests {
             Resp::Bulk(Some(value)) if value.as_ref() == b"live")
         );
         let persistence = Arc::new(Persistence::new(None));
-        let (pool, mut workers) = Pool::start(engine, 2, persistence.clone());
+        let (pool, mut workers) = Pool::start(engine, 2, persistence.clone(), state.clone());
         let mut scripts = ScriptRunner::new().unwrap();
         let mut replay = ReplayState::default();
         let result = snapshot(
@@ -2894,13 +2914,17 @@ mod tests {
             let Some(Request::Native(Control::Apply { reply, .. })) = receiver.recv().await else {
                 panic!("native apply was not queued");
             };
-            reply.send(Ok(Applied { fsynced_offset: 0 })).unwrap();
+            reply
+                .send(Ok(Applied {
+                    fsynced_offset: None,
+                }))
+                .unwrap();
         };
         let (applied, ()) =
             tokio::time::timeout(Duration::from_secs(1), async { tokio::join!(apply, actor) })
                 .await
                 .unwrap();
-        assert_eq!(applied.unwrap().fsynced_offset, 0);
+        assert_eq!(applied.unwrap().fsynced_offset, None);
         state.write_gate.resume();
     }
     #[tokio::test]
@@ -2911,7 +2935,7 @@ mod tests {
         let persistence = Persistence::new(None);
         persistence.set_native(native.clone());
         assert_eq!(persistence.native_offset(), 80);
-        assert_eq!(persistence.last_fsynced_native_offset(), 40);
+        assert_eq!(persistence.last_fsynced_native_offset(), Some(40));
         persistence
             .commit_batch(&Batch {
                 timestamp_ms: 0,
@@ -2925,8 +2949,8 @@ mod tests {
             .unwrap();
         assert!(persistence.native_offset() > 80);
         persistence.finish().await.unwrap();
-        assert_eq!(persistence.last_fsynced_native_offset(), 40);
-        assert_eq!(native.status().fsynced_offset, 40);
+        assert_eq!(persistence.last_fsynced_native_offset(), Some(40));
+        assert_eq!(native.status().fsynced_offset, Some(40));
     }
     #[tokio::test]
     async fn paused_role_configuration_fences_a_generation_without_waiting_for_its_actor_lease() {
@@ -2962,13 +2986,13 @@ mod tests {
                 Some(native_replication::CommittedPosition {
                     history: Bytes::from(history.clone()),
                     offset: 100,
-                    fsynced_offset: 90,
+                    fsynced_offset: Some(90),
                 }),
             )
             .unwrap();
         let promoted = native.status();
         assert_eq!(promoted.offset, 100);
-        assert_eq!(promoted.fsynced_offset, 90);
+        assert_eq!(promoted.fsynced_offset, Some(90));
         assert_eq!(promoted.secondary_history, Some(history));
         assert_eq!(promoted.secondary_valid_through, 101);
         assert!(check_generation(&state, generation).is_err());
@@ -3086,11 +3110,11 @@ mod tests {
             .unwrap();
         assert!(offset > 0);
         assert_eq!(persistence.native_offset(), offset);
-        assert_eq!(persistence.last_fsynced_native_offset(), 0);
+        assert_eq!(persistence.last_fsynced_native_offset(), Some(0));
         assert!(!persistence.status().await.dirty);
         persistence.periodic_sync().await.unwrap();
-        assert_eq!(persistence.last_fsynced_native_offset(), offset);
-        assert_eq!(native.status().fsynced_offset, offset);
+        assert_eq!(persistence.last_fsynced_native_offset(), Some(offset));
+        assert_eq!(native.status().fsynced_offset, Some(offset));
         drop(persistence);
         drop(native);
         std::fs::remove_dir_all(directory).unwrap();
@@ -3115,6 +3139,7 @@ mod follow_barrier_tests {
                 announce_ip: None,
                 io_timeout: Duration::from_secs(1),
                 reconnect_delay: Duration::from_millis(10),
+                lazy_history: false,
                 aof_enabled: false,
                 allow_loopback: true,
                 allow_private: true,

@@ -461,7 +461,7 @@ mod tests {
 
     async fn command(stream: &mut TcpStream, input: &mut BytesMut) -> Vec<Bytes> {
         loop {
-            if let Some(args) = crate::protocol::parse(input).unwrap() {
+            if let Some(args) = crate::protocol::parse(input, Vec::with_capacity).unwrap() {
                 return args;
             }
             assert_ne!(stream.read_buf(input).await.unwrap(), 0);

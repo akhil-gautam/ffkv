@@ -11,6 +11,10 @@ These are implementation safety bounds, **not** recommended operating targets or
 | --- | --- |
 | Canonical RESP request | 8 MiB **including framing**, 1,024 arguments including command |
 | Read-ahead pipeline data while awaiting reply | At most 8 MiB per TCP connection, then backpressure; queued commands are not executed early |
+| Ordinary socket read budget | Starts at 8 KiB; full-budget reads double it up to 64 KiB, genuinely short reads reset it. Previous-read-size reservation keeps small non-pipelined values packed. This is not an allocation cap: partial requests and stored slices can retain larger backing buffers |
+| Encoded response scratch | Starts at 128 bytes and grows as needed to at most 128 KiB per connection, retained until close. A large collection reply can reach this ceiling without pipelining. Individual bulk payloads larger than 16 KiB stream directly; status/error lines are sanitized in bounded chunks. Excludes the logical reply itself and TLS/socket buffers |
+| Pending pipeline completions | At most 16 commands and 8 MiB of consumed request bytes per connection. An admitted partial request under 8 KiB may receive one immediately-ready read of at most 8 KiB per parsed command before older output settles; never waits for input to fill a batch. Arguments can retain multiple input allocations: logical byte counts are not a total heap/RSS bound |
+| Recycled argument vectors | At most 16 emptied vectors per connection, each with capacity for at most 32 arguments; no argument payloads retained in this cache |
 | Default connections | 1,024; configurable positive u32 maximum; excess connections close |
 | Internal shard actors | 1–256; default 4 |
 | Standalone logical databases | 1–65,536 configured; default 16 |

@@ -1,0 +1,587 @@
+{
+ "schema": 1,
+ "binary": "/opt/ffkv-wave7b-combined",
+ "binary_sha256": "b701a75a87ba5136cbf327986913ca83afa9708351154cb91bad2e4c477f190d",
+ "source": "Integrated working tree (stable-policy-acl + lease/ACL snapshot + actor contention + waves 5-7, SipHash dataset maps retained)",
+ "passed_trials": 162,
+ "failed_trials": 0,
+ "wins_vs_dragonfly": 27,
+ "wins_vs_redis": 18,
+ "every_ffkv_trial_above_every_dragonfly_trial": true,
+ "settings": {
+  "benchmark_binary": "/opt/redis-8.2.1/src/redis-benchmark",
+  "binary": "/opt/ffkv-wave7b-combined",
+  "calibration_iterations": 6,
+  "client_cpus": [
+   4,
+   5,
+   6,
+   7
+  ],
+  "dragonfly_binary": "/opt/dragonfly-aarch64",
+  "dragonfly_threads": 4,
+  "engines": [
+   "ffkv",
+   "redis",
+   "dragonfly"
+  ],
+  "ffkv_shards": 64,
+  "json": "/evidence/wave7b-matrix.json",
+  "max_requests": 20000000,
+  "min_requests": 128,
+  "modes": [
+   "memory"
+  ],
+  "preload_timeout": 180,
+  "profiles": [
+   "c1-p1-t1",
+   "c32-p1-t4",
+   "c32-p16-t4"
+  ],
+  "redis_binary": "/opt/redis-8.2.1/src/redis-server",
+  "repetitions": 2,
+  "seed": 12345,
+  "server_cpus": [
+   0,
+   1,
+   2,
+   3
+  ],
+  "socket_timeout": 30,
+  "startup_timeout": 20,
+  "target_seconds": 5.0,
+  "timeout": 120,
+  "workloads": [
+   "get-256",
+   "set-256",
+   "get-4096",
+   "set-4096",
+   "incr",
+   "hget",
+   "hset",
+   "zadd",
+   "zrange"
+  ]
+ },
+ "environment": [
+  "Apple M4 MacBook Pro (Mac16,1), 10 cores, 16 GiB; one ARM64 Linux VM (OrbStack) for all servers and clients",
+  "Server CPUs 0-3, client CPUs 4-7; Redis/redis-benchmark 8.2.1, Dragonfly 2.0.2 (4 proactors), ffkv 64 shards; memory mode only",
+  "pmset reported Battery Power (discharging 62% to 57%) and Low Power Mode enabled; competing applications were not suspended for this run",
+  "Two repetitions per engine/case; no significance claim; no rows discarded"
+ ],
+ "cases": [
+  {
+   "workload": "get-256",
+   "profile": "c1-p1-t1",
+   "ffkv_rps": [
+    21317.74,
+    21775.28
+   ],
+   "redis_rps": [
+    22368.93,
+    22460.76
+   ],
+   "dragonfly_rps": [
+    13462.21,
+    12992.03
+   ],
+   "median_ffkv_over_dragonfly": 1.629,
+   "median_ffkv_over_redis": 0.9613,
+   "worst_ffkv_over_best_dragonfly": 1.5835
+  },
+  {
+   "workload": "get-256",
+   "profile": "c32-p1-t4",
+   "ffkv_rps": [
+    599102.31,
+    595090.12
+   ],
+   "redis_rps": [
+    358451.19,
+    358744.78
+   ],
+   "dragonfly_rps": [
+    338541.66,
+    338466.47
+   ],
+   "median_ffkv_over_dragonfly": 1.7639,
+   "median_ffkv_over_redis": 1.6651,
+   "worst_ffkv_over_best_dragonfly": 1.7578
+  },
+  {
+   "workload": "get-256",
+   "profile": "c32-p16-t4",
+   "ffkv_rps": [
+    2964341.25,
+    2917742.5
+   ],
+   "redis_rps": [
+    2076757.25,
+    2088528.75
+   ],
+   "dragonfly_rps": [
+    2606440.75,
+    2600310.0
+   ],
+   "median_ffkv_over_dragonfly": 1.1297,
+   "median_ffkv_over_redis": 1.4122,
+   "worst_ffkv_over_best_dragonfly": 1.1194
+  },
+  {
+   "workload": "get-4096",
+   "profile": "c1-p1-t1",
+   "ffkv_rps": [
+    20576.35,
+    20761.55
+   ],
+   "redis_rps": [
+    21106.84,
+    20897.03
+   ],
+   "dragonfly_rps": [
+    12445.27,
+    12440.55
+   ],
+   "median_ffkv_over_dragonfly": 1.6611,
+   "median_ffkv_over_redis": 0.9841,
+   "worst_ffkv_over_best_dragonfly": 1.6533
+  },
+  {
+   "workload": "get-4096",
+   "profile": "c32-p1-t4",
+   "ffkv_rps": [
+    531292.94,
+    562672.62
+   ],
+   "redis_rps": [
+    282093.31,
+    282093.31
+   ],
+   "dragonfly_rps": [
+    304694.25,
+    298679.22
+   ],
+   "median_ffkv_over_dragonfly": 1.8131,
+   "median_ffkv_over_redis": 1.939,
+   "worst_ffkv_over_best_dragonfly": 1.7437
+  },
+  {
+   "workload": "get-4096",
+   "profile": "c32-p16-t4",
+   "ffkv_rps": [
+    1899338.38,
+    1781827.5
+   ],
+   "redis_rps": [
+    775928.06,
+    815646.69
+   ],
+   "dragonfly_rps": [
+    1155725.38,
+    1156264.75
+   ],
+   "median_ffkv_over_dragonfly": 1.5922,
+   "median_ffkv_over_redis": 2.3129,
+   "worst_ffkv_over_best_dragonfly": 1.541
+  },
+  {
+   "workload": "hget",
+   "profile": "c1-p1-t1",
+   "ffkv_rps": [
+    22036.01,
+    22002.77
+   ],
+   "redis_rps": [
+    22468.12,
+    22290.47
+   ],
+   "dragonfly_rps": [
+    13168.09,
+    13217.8
+   ],
+   "median_ffkv_over_dragonfly": 1.669,
+   "median_ffkv_over_redis": 0.9839,
+   "worst_ffkv_over_best_dragonfly": 1.6646
+  },
+  {
+   "workload": "hget",
+   "profile": "c32-p1-t4",
+   "ffkv_rps": [
+    561290.38,
+    605299.75
+   ],
+   "redis_rps": [
+    338541.66,
+    338541.66
+   ],
+   "dragonfly_rps": [
+    338541.66,
+    338541.66
+   ],
+   "median_ffkv_over_dragonfly": 1.723,
+   "median_ffkv_over_redis": 1.723,
+   "worst_ffkv_over_best_dragonfly": 1.658
+  },
+  {
+   "workload": "hget",
+   "profile": "c32-p16-t4",
+   "ffkv_rps": [
+    2736580.0,
+    2917127.75
+   ],
+   "redis_rps": [
+    1737934.75,
+    1640597.62
+   ],
+   "dragonfly_rps": [
+    2600310.0,
+    2599660.25
+   ],
+   "median_ffkv_over_dragonfly": 1.0873,
+   "median_ffkv_over_redis": 1.6734,
+   "worst_ffkv_over_best_dragonfly": 1.0524
+  },
+  {
+   "workload": "hset",
+   "profile": "c1-p1-t1",
+   "ffkv_rps": [
+    21623.37,
+    21870.21
+   ],
+   "redis_rps": [
+    22081.52,
+    21997.41
+   ],
+   "dragonfly_rps": [
+    12981.33,
+    13046.76
+   ],
+   "median_ffkv_over_dragonfly": 1.671,
+   "median_ffkv_over_redis": 0.9867,
+   "worst_ffkv_over_best_dragonfly": 1.6574
+  },
+  {
+   "workload": "hset",
+   "profile": "c32-p1-t4",
+   "ffkv_rps": [
+    559889.88,
+    559768.94
+   ],
+   "redis_rps": [
+    338466.47,
+    338241.06
+   ],
+   "dragonfly_rps": [
+    338541.66,
+    338541.66
+   ],
+   "median_ffkv_over_dragonfly": 1.6536,
+   "median_ffkv_over_redis": 1.6546,
+   "worst_ffkv_over_best_dragonfly": 1.6535
+  },
+  {
+   "workload": "hset",
+   "profile": "c32-p16-t4",
+   "ffkv_rps": [
+    2546822.75,
+    2709287.75
+   ],
+   "redis_rps": [
+    1560152.0,
+    1468584.12
+   ],
+   "dragonfly_rps": [
+    2447386.5,
+    2446811.0
+   ],
+   "median_ffkv_over_dragonfly": 1.0739,
+   "median_ffkv_over_redis": 1.7354,
+   "worst_ffkv_over_best_dragonfly": 1.0406
+  },
+  {
+   "workload": "incr",
+   "profile": "c1-p1-t1",
+   "ffkv_rps": [
+    21424.88,
+    21511.8
+   ],
+   "redis_rps": [
+    22389.86,
+    22340.07
+   ],
+   "dragonfly_rps": [
+    13399.3,
+    13284.1
+   ],
+   "median_ffkv_over_dragonfly": 1.6091,
+   "median_ffkv_over_redis": 0.9599,
+   "worst_ffkv_over_best_dragonfly": 1.599
+  },
+  {
+   "workload": "incr",
+   "profile": "c32-p1-t4",
+   "ffkv_rps": [
+    594810.31,
+    595489.06
+   ],
+   "redis_rps": [
+    359655.62,
+    359949.19
+   ],
+   "dragonfly_rps": [
+    338541.66,
+    338541.66
+   ],
+   "median_ffkv_over_dragonfly": 1.758,
+   "median_ffkv_over_redis": 1.6541,
+   "worst_ffkv_over_best_dragonfly": 1.757
+  },
+  {
+   "workload": "incr",
+   "profile": "c32-p16-t4",
+   "ffkv_rps": [
+    3059202.5,
+    3093188.5
+   ],
+   "redis_rps": [
+    2079936.12,
+    2079936.12
+   ],
+   "dragonfly_rps": [
+    2970828.0,
+    2971676.75
+   ],
+   "median_ffkv_over_dragonfly": 1.0353,
+   "median_ffkv_over_redis": 1.479,
+   "worst_ffkv_over_best_dragonfly": 1.0295
+  },
+  {
+   "workload": "set-256",
+   "profile": "c1-p1-t1",
+   "ffkv_rps": [
+    21272.31,
+    21503.02
+   ],
+   "redis_rps": [
+    21985.18,
+    21872.26
+   ],
+   "dragonfly_rps": [
+    13106.88,
+    13121.32
+   ],
+   "median_ffkv_over_dragonfly": 1.6309,
+   "median_ffkv_over_redis": 0.9753,
+   "worst_ffkv_over_best_dragonfly": 1.6212
+  },
+  {
+   "workload": "set-256",
+   "profile": "c32-p1-t4",
+   "ffkv_rps": [
+    559644.62,
+    597100.0
+   ],
+   "redis_rps": [
+    339849.81,
+    338541.66
+   ],
+   "dragonfly_rps": [
+    339603.75,
+    338541.66
+   ],
+   "median_ffkv_over_dragonfly": 1.7057,
+   "median_ffkv_over_redis": 1.7051,
+   "worst_ffkv_over_best_dragonfly": 1.6479
+  },
+  {
+   "workload": "set-256",
+   "profile": "c32-p16-t4",
+   "ffkv_rps": [
+    2542733.0,
+    2725663.0
+   ],
+   "redis_rps": [
+    1740595.38,
+    1733386.75
+   ],
+   "dragonfly_rps": [
+    2446811.0,
+    2408845.0
+   ],
+   "median_ffkv_over_dragonfly": 1.085,
+   "median_ffkv_over_redis": 1.5165,
+   "worst_ffkv_over_best_dragonfly": 1.0392
+  },
+  {
+   "workload": "set-4096",
+   "profile": "c1-p1-t1",
+   "ffkv_rps": [
+    20530.45,
+    20308.27
+   ],
+   "redis_rps": [
+    21015.42,
+    20893.55
+   ],
+   "dragonfly_rps": [
+    12436.4,
+    12587.9
+   ],
+   "median_ffkv_over_dragonfly": 1.632,
+   "median_ffkv_over_redis": 0.9745,
+   "worst_ffkv_over_best_dragonfly": 1.6133
+  },
+  {
+   "workload": "set-4096",
+   "profile": "c32-p1-t4",
+   "ffkv_rps": [
+    523919.22,
+    526989.94
+   ],
+   "redis_rps": [
+    282093.31,
+    282155.97
+   ],
+   "dragonfly_rps": [
+    305718.06,
+    305513.31
+   ],
+   "median_ffkv_over_dragonfly": 1.7193,
+   "median_ffkv_over_redis": 1.8625,
+   "worst_ffkv_over_best_dragonfly": 1.7137
+  },
+  {
+   "workload": "set-4096",
+   "profile": "c32-p16-t4",
+   "ffkv_rps": [
+    1632128.0,
+    1650987.12
+   ],
+   "redis_rps": [
+    497556.66,
+    491274.38
+   ],
+   "dragonfly_rps": [
+    1100498.38,
+    1095434.38
+   ],
+   "median_ffkv_over_dragonfly": 1.4951,
+   "median_ffkv_over_redis": 3.3202,
+   "worst_ffkv_over_best_dragonfly": 1.4831
+  },
+  {
+   "workload": "zadd",
+   "profile": "c1-p1-t1",
+   "ffkv_rps": [
+    21190.28,
+    21374.95
+   ],
+   "redis_rps": [
+    21344.03,
+    21416.58
+   ],
+   "dragonfly_rps": [
+    12786.5,
+    12952.85
+   ],
+   "median_ffkv_over_dragonfly": 1.6537,
+   "median_ffkv_over_redis": 0.9954,
+   "worst_ffkv_over_best_dragonfly": 1.636
+  },
+  {
+   "workload": "zadd",
+   "profile": "c32-p1-t4",
+   "ffkv_rps": [
+    446065.88,
+    419273.12
+   ],
+   "redis_rps": [
+    237988.5,
+    237929.05
+   ],
+   "dragonfly_rps": [
+    320659.94,
+    320659.94
+   ],
+   "median_ffkv_over_dragonfly": 1.3493,
+   "median_ffkv_over_redis": 1.8183,
+   "worst_ffkv_over_best_dragonfly": 1.3075
+  },
+  {
+   "workload": "zadd",
+   "profile": "c32-p16-t4",
+   "ffkv_rps": [
+    2381625.0,
+    2415349.0
+   ],
+   "redis_rps": [
+    548041.19,
+    548041.19
+   ],
+   "dragonfly_rps": [
+    1836142.12,
+    1835710.38
+   ],
+   "median_ffkv_over_dragonfly": 1.3064,
+   "median_ffkv_over_redis": 4.3765,
+   "worst_ffkv_over_best_dragonfly": 1.2971
+  },
+  {
+   "workload": "zrange",
+   "profile": "c1-p1-t1",
+   "ffkv_rps": [
+    20962.31,
+    21087.56
+   ],
+   "redis_rps": [
+    21915.31,
+    21797.07
+   ],
+   "dragonfly_rps": [
+    12830.23,
+    12894.77
+   ],
+   "median_ffkv_over_dragonfly": 1.6346,
+   "median_ffkv_over_redis": 0.962,
+   "worst_ffkv_over_best_dragonfly": 1.6256
+  },
+  {
+   "workload": "zrange",
+   "profile": "c32-p1-t4",
+   "ffkv_rps": [
+    560398.06,
+    547978.69
+   ],
+   "redis_rps": [
+    321805.09,
+    321805.09
+   ],
+   "dragonfly_rps": [
+    320727.44,
+    321899.0
+   ],
+   "median_ffkv_over_dragonfly": 1.7248,
+   "median_ffkv_over_redis": 1.7221,
+   "worst_ffkv_over_best_dragonfly": 1.7023
+  },
+  {
+   "workload": "zrange",
+   "profile": "c32-p16-t4",
+   "ffkv_rps": [
+    1767610.5,
+    1804523.12
+   ],
+   "redis_rps": [
+    1094449.88,
+    1094219.5
+   ],
+   "dragonfly_rps": [
+    1484439.38,
+    1485901.5
+   ],
+   "median_ffkv_over_dragonfly": 1.2026,
+   "median_ffkv_over_redis": 1.6321,
+   "worst_ffkv_over_best_dragonfly": 1.1896
+  }
+ ]
+}

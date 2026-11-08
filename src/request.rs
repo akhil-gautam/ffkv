@@ -36,8 +36,38 @@ pub struct CommandRequest {
     pub origin: Origin,
     pub user: Option<Arc<crate::auth::User>>,
     pub session: Option<Arc<crate::session::ClientSession>>,
-    pub write_permit: Option<tokio::sync::OwnedRwLockReadGuard<()>>,
+    pub write_permit: Option<crate::write_gate::Permit>,
     pub cluster_client: Option<crate::cluster::ClusterClient>,
+}
+
+/// A command the connection may run on one shard lease: a `CommandRequest`
+/// still without its reply channel, bound to the arguments the connection
+/// keeps for the command's observation and carrying the validation they
+/// already passed. Escalation hands it back untouched.
+pub struct SingleKey<'a> {
+    pub command: crate::engine::BoundCommand<'a>,
+    pub origin: Origin,
+    pub user: Option<Arc<crate::auth::User>>,
+    pub session: Option<Arc<crate::session::ClientSession>>,
+    pub write_permit: Option<crate::write_gate::Permit>,
+    pub cluster_client: Option<crate::cluster::ClusterClient>,
+}
+
+impl SingleKey<'_> {
+    /// The coordinator queue owns its request independently of the
+    /// connection, so only this hand-off copies the arguments; the queue
+    /// binds its owned copy again.
+    pub fn into_request(self, reply: oneshot::Sender<Resp>) -> CommandRequest {
+        CommandRequest {
+            args: self.command.args().to_vec(),
+            reply,
+            origin: self.origin,
+            user: self.user,
+            session: self.session,
+            write_permit: self.write_permit,
+            cluster_client: self.cluster_client,
+        }
+    }
 }
 
 impl CommandRequest {
@@ -53,6 +83,7 @@ impl CommandRequest {
             cluster_client: None,
         }
     }
+    #[cfg(test)]
     pub fn client(
         args: Vec<Bytes>,
         reply: oneshot::Sender<Resp>,
@@ -86,7 +117,7 @@ pub enum Request {
         user: Option<Arc<crate::auth::User>>,
         origin: Origin,
         session: Option<Arc<crate::session::ClientSession>>,
-        write_permit: Option<tokio::sync::OwnedRwLockReadGuard<()>>,
+        write_permit: Option<crate::write_gate::Permit>,
         cluster_client: Option<crate::cluster::ClusterClient>,
         reply: oneshot::Sender<Resp>,
     },
@@ -99,7 +130,7 @@ pub enum Request {
         user: Option<Arc<crate::auth::User>>,
         origin: Origin,
         session: Option<Arc<crate::session::ClientSession>>,
-        write_permit: Option<tokio::sync::OwnedRwLockReadGuard<()>>,
+        write_permit: Option<crate::write_gate::Permit>,
         cluster_client: Option<crate::cluster::ClusterClient>,
         reply: oneshot::Sender<Resp>,
     },

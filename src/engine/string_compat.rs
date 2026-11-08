@@ -1,6 +1,6 @@
 use super::{
-    CommandSpec, Engine, ExpiryKind, Mutation, Resp, Value, array, error, integer, integer_error,
-    invalid_expiry, syntax_error, wrong_type,
+    CommandSpec, Engine, ExpiryKind, Mutation, Resp, StringWrite, Value, array, error, integer,
+    integer_error, invalid_expiry, syntax_error, wrong_type,
 };
 use bytes::Bytes;
 use num_bigint::BigUint;
@@ -260,7 +260,7 @@ impl<'a> SetCondition<'a> {
             _ => {}
         }
         let current = match existing {
-            Some(Value::String(s)) => Some(s),
+            Some(Value::String(s)) => Some(s.bytes()),
             Some(_) => return Err(wrong_type()),
             None => None,
         };
@@ -436,7 +436,7 @@ impl Engine {
         match self.value(&args[1], now) {
             Some(Value::String(value)) => Resp::Bulk(Some(Bytes::from(format!(
                 "{:016x}",
-                xxhash_rust::xxh3::xxh3_64(value)
+                xxhash_rust::xxh3::xxh3_64(value.bytes())
             )))),
             Some(_) => wrong_type(),
             None => Resp::Bulk(None),
@@ -477,7 +477,7 @@ impl Engine {
         };
         self.discard_expired(&args[1], now);
         let old = match self.entries.get(&args[1]).map(|e| &e.value) {
-            Some(Value::String(raw)) => match parse_float(raw) {
+            Some(Value::String(raw)) => match parse_float(raw.bytes()) {
                 Ok(v) => v,
                 Err(e) => return e,
             },
@@ -490,7 +490,7 @@ impl Engine {
         };
         let value = format_float(sum);
         let ttl = self.entries.get(&args[1]).and_then(|e| e.expires_at);
-        self.store(&args[1], value.clone(), ttl, now);
+        self.store(&args[1], StringWrite::Copy(&value), ttl, now);
         Resp::Bulk(Some(value))
     }
     fn string_msetex(&mut self, args: &[Bytes], now: i64) -> Resp {
@@ -513,7 +513,7 @@ impl Engine {
                 Expiration::Keep => self.entries.get(&pair[0]).and_then(|e| e.expires_at),
                 _ => None,
             };
-            self.store(&pair[0], Bytes::copy_from_slice(&pair[1]), expiry, now);
+            self.store(&pair[0], StringWrite::Copy(&pair[1]), expiry, now);
         }
         Resp::Integer(1)
     }
@@ -647,11 +647,13 @@ impl Engine {
         let entry = self.entries.get(&args[1]);
         let previous_ttl = entry.and_then(|e| e.expires_at);
         let raw = match entry.map(|e| &e.value) {
-            Some(Value::String(s)) => Some(s),
+            Some(Value::String(s)) => Some(s.bytes()),
             Some(_) => return wrong_type(),
             None => None,
         };
-        let (encoded, reply) = match options.increment {
+        // Float text is reply and journal bytes too; integers format in place.
+        let float;
+        let (write, reply) = match options.increment {
             Increment::Integer(delta) => {
                 let old = match raw {
                     Some(s) => match integer(s) {
@@ -680,7 +682,7 @@ impl Engine {
                     return error("ERR applied increment would overflow");
                 };
                 (
-                    Bytes::from(result.to_string()),
+                    StringWrite::Integer(result),
                     array(vec![Resp::Integer(result), Resp::Integer(applied)]),
                 )
             }
@@ -719,8 +721,9 @@ impl Engine {
                 if !applied.is_finite() {
                     return error("ERR increment would produce NaN or Infinity");
                 }
+                float = format_float(result);
                 (
-                    format_float(result),
+                    StringWrite::Copy(&float),
                     array(vec![
                         self.string_float_reply(result),
                         self.string_float_reply(applied),
@@ -737,7 +740,7 @@ impl Engine {
                 _ => previous_ttl,
             }
         };
-        self.store(&args[1], encoded, expiry, now);
+        self.store(&args[1], write, expiry, now);
         reply
     }
 
@@ -786,12 +789,12 @@ impl Engine {
             return error("ERR If you want both the length and indexes, please just use IDX.");
         }
         let a = match self.value(&args[1], now) {
-            Some(Value::String(s)) => s.clone(),
+            Some(Value::String(s)) => s.bytes().clone(),
             Some(_) => return wrong_type(),
             None => Bytes::new(),
         };
         let b = match self.value(&args[2], now) {
-            Some(Value::String(s)) => s.clone(),
+            Some(Value::String(s)) => s.bytes().clone(),
             Some(_) => return wrong_type(),
             None => Bytes::new(),
         };
@@ -950,7 +953,7 @@ mod tests {
         let mut e = Engine::new();
         e.store(
             &Bytes::from_static(b"k"),
-            Bytes::from_static(b"Hello world"),
+            StringWrite::Copy(&Bytes::from_static(b"Hello world")),
             None,
             1000,
         );
@@ -971,7 +974,7 @@ mod tests {
         assert!(SetCondition::DigestNe(&raw).matches(None).unwrap());
         assert!(
             SetCondition::DigestEq(&raw)
-                .matches(Some(&Value::String(Bytes::new())))
+                .matches(Some(&Value::String(super::super::StringValue::default())))
                 .is_err()
         );
         let mut e = Engine::new();
@@ -1127,7 +1130,7 @@ mod tests {
             let mut e = Engine::new();
             e.store(
                 &Bytes::from_static(b"k"),
-                Bytes::from_static(b"5"),
+                StringWrite::Copy(&Bytes::from_static(b"5")),
                 Some(9000),
                 1000,
             );
@@ -1230,14 +1233,18 @@ mod tests {
         let value = Bytes::from(vec![b'a'; 4096]);
         let a = Bytes::from_static(b"a");
         let b = Bytes::from_static(b"b");
-        e.store(&a, value.clone(), Some(9000), 1000);
-        e.store(&b, value.clone(), None, 1000);
+        e.store(&a, StringWrite::Copy(&value), Some(9000), 1000);
+        e.store(&b, StringWrite::Copy(&value), None, 1000);
         assert!(matches!(
             run(&mut e, &["LCS", "a", "b"], 1000),
             Resp::Error(_)
         ));
         assert_eq!(e.entries.get(&a).unwrap().expires_at, Some(9000));
-        assert!(matches!(&e.entries.get(&a).unwrap().value,Value::String(s) if s == &value));
-        assert!(matches!(&e.entries.get(&b).unwrap().value,Value::String(s) if s == &value));
+        assert!(
+            matches!(&e.entries.get(&a).unwrap().value,Value::String(s) if s.bytes() == &value)
+        );
+        assert!(
+            matches!(&e.entries.get(&b).unwrap().value,Value::String(s) if s.bytes() == &value)
+        );
     }
 }

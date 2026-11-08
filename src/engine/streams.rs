@@ -3033,7 +3033,9 @@ mod tests {
             .collect()
     }
     fn run(engine: &mut TestEngine, now: i64, values: &[&str]) -> Resp {
-        let execution = engine.execute_at_time(&args(values), now).unwrap();
+        let execution = engine
+            .execute_at_time(&mut crate::engine::BoundCommand::bind(&args(values)), now)
+            .unwrap();
         if let Some(batch) = engine.take_batch() {
             engine.journal.push(batch);
         }
@@ -3130,7 +3132,8 @@ mod tests {
         let mut command = args(&["XADD", "s", "10-1"]);
         command.extend(fields.iter().cloned());
         assert!(matches!(
-            e.execute_at_time(&command, 1000).unwrap(),
+            e.execute_at_time(&mut crate::engine::BoundCommand::bind(&command), 1000)
+                .unwrap(),
             Execution::Reply(_)
         ));
         run(&mut e, 1000, &["XADD", "s", "10-2", "f", "b"]);

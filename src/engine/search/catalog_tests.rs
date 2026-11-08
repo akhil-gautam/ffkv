@@ -571,7 +571,10 @@ fn disposable_configuration_restores_the_actual_pool_and_collector_schedule() {
 fn swapdb_from_a_nonzero_database_reconciles_db0_and_preserves_the_catalog() {
     use super::Engine;
     fn run(engine: &mut Engine, command: &[&str]) -> super::Resp {
-        let reply = match engine.execute_at_time(&args(command), 1000).unwrap() {
+        let reply = match engine
+            .execute_at_time(&mut crate::engine::BoundCommand::bind(&args(command)), 1000)
+            .unwrap()
+        {
             super::super::Execution::Reply(reply)
             | super::super::Execution::Pushed { reply, .. } => reply,
             _ => panic!("unexpected blocking search command"),
@@ -651,7 +654,10 @@ fn coherent_swap_reconciliation_keeps_all_four_shards_indexed_without_moving_sou
     use super::{Catalog, Engine};
     use std::sync::Arc;
     fn run(engine: &mut Engine, command: &[Bytes]) {
-        match engine.execute_at_time(command, 1000).unwrap() {
+        match engine
+            .execute_at_time(&mut crate::engine::BoundCommand::bind(command), 1000)
+            .unwrap()
+        {
             super::super::Execution::Reply(super::Resp::Error(message)) => panic!("{message}"),
             super::super::Execution::Reply(_) | super::super::Execution::Pushed { .. } => {}
             _ => panic!("unexpected blocking execution"),
@@ -768,4 +774,64 @@ fn coherent_swap_reconciliation_keeps_all_four_shards_indexed_without_moving_sou
             .unwrap()
             .is_empty()
     );
+}
+
+#[test]
+fn a_shard_that_wrote_before_any_index_indexes_its_writes_once_one_exists() {
+    use super::{Catalog, Engine};
+    use std::sync::Arc;
+    fn run(engine: &mut Engine, command: &[&str]) {
+        match engine
+            .execute_at_time(&mut crate::engine::BoundCommand::bind(&args(command)), 1000)
+            .unwrap()
+        {
+            super::super::Execution::Reply(super::Resp::Error(message)) => panic!("{message}"),
+            super::super::Execution::Reply(_) | super::super::Execution::Pushed { .. } => {}
+            _ => panic!("unexpected blocking execution"),
+        }
+        // As a commit stages it.
+        engine.finish_pending_search();
+        engine.take_batch();
+    }
+    for journaled in [false, true] {
+        let catalog = Arc::new(Catalog::new());
+        let mut creator = Engine::new();
+        let mut writer = Engine::new();
+        for engine in [&mut creator, &mut writer] {
+            engine.search = Some(catalog.clone());
+            engine.set_recording(journaled);
+        }
+        run(&mut writer, &["HSET", "doc:early", "title", "before"]);
+        run(
+            &mut creator,
+            &[
+                "FT.CREATE",
+                "idx",
+                "PREFIX",
+                "1",
+                "doc:",
+                "SCHEMA",
+                "title",
+                "TEXT",
+            ],
+        );
+        run(&mut writer, &["HSET", "doc:late", "title", "after"]);
+        let state = catalog.lock();
+        let index = &state.indexes["idx"];
+        assert_eq!(index.docs.len(), 1, "journaled: {journaled}");
+        let hits = |text: &str| {
+            super::query::execute(
+                index,
+                text,
+                &super::query::Options::default(),
+                &state.config,
+                1000,
+            )
+            .unwrap()
+            .hits
+            .len()
+        };
+        assert_eq!(hits("after"), 1, "journaled: {journaled}");
+        assert_eq!(hits("before"), 0, "journaled: {journaled}");
+    }
 }

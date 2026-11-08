@@ -35,6 +35,46 @@ Feature: Stateful server administration and diagnostics
       {"latency-monitor-threshold":"7"}
       """
 
+  @command_CONFIG_GET @command_CONFIG_SET @command_INFO
+  Scenario: The AOF policy outlives disabling AOF, including changes made while it is off
+    Given a fresh ffkv server
+    And client "default" uses RESP 3
+    And the following commands succeed:
+      """
+      [["CONFIG","SET","appendfsync","everysec"],["CONFIG","SET","appendonly","no"],["CONFIG","SET","appendonly","yes"]]
+      """
+    When I execute:
+      """
+      ["INFO","persistence"]
+      """
+    Then the reply text contains "ffkv_wal_policy:everysec"
+    And the following commands succeed:
+      """
+      [["CONFIG","SET","appendfsync","always"],["CONFIG","SET","appendonly","no"],["CONFIG","SET","appendfsync","everysec"],["CONFIG","SET","appendonly","yes"]]
+      """
+    When I execute:
+      """
+      ["INFO","persistence"]
+      """
+    Then the reply text contains "ffkv_wal_policy:everysec"
+    And the following commands succeed:
+      """
+      [["CONFIG","SET","appendonly","no"],["CONFIG","SET","appendonly","yes","appendfsync","always"]]
+      """
+    When I execute:
+      """
+      ["INFO","persistence"]
+      """
+    Then the reply text contains "ffkv_wal_policy:strict"
+    When I execute:
+      """
+      ["CONFIG","GET","appendonly","appendfsync"]
+      """
+    Then the reply contains:
+      """
+      {"appendonly":"yes","appendfsync":"always"}
+      """
+
   @command_CONFIG_REWRITE
   Scenario: Rewritten effective configuration is loaded after a crash
     Given a fresh ffkv server

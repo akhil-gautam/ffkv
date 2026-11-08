@@ -93,7 +93,7 @@ impl Bodies {
 
 fn value_allocations(value: &Value, samples: usize) -> usize {
     match value {
-        Value::String(value) => value.len(),
+        Value::String(value) => value.bytes().len(),
         Value::List(values) => {
             let mut bodies = Bodies::default();
             allocation::<crate::storage::Payload>(values.capacity()).saturating_add(sampled(
@@ -102,9 +102,14 @@ fn value_allocations(value: &Value, samples: usize) -> usize {
                 |value| bodies.allocation(value.memory_identity(), value.memory_footprint()),
             ))
         }
-        Value::Set(value) => value.memory_footprint(samples),
-        Value::Hash(value) => value.memory_footprint(samples),
-        Value::SortedSet(value) => value.memory_footprint(samples),
+        Value::Set(value) => {
+            size_of::<super::sets::SetValue>().saturating_add(value.memory_footprint(samples))
+        }
+        Value::Hash(value) => {
+            size_of::<super::hashes::HashValue>().saturating_add(value.memory_footprint(samples))
+        }
+        Value::SortedSet(value) => size_of::<super::sorted_sets::SortedSetValue>()
+            .saturating_add(value.memory_footprint(samples)),
         Value::Queue(value) => {
             size_of::<crate::queue::Queue>().saturating_add(value.memory_footprint(samples))
         }

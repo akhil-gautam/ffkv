@@ -51,6 +51,7 @@ impl Catalog {
             gc_running: std::sync::atomic::AtomicBool::new(false),
         }
     }
+    #[inline]
     pub(super) fn has_indexes(&self) -> bool {
         self.count.load(Ordering::Acquire) != 0
     }
@@ -369,7 +370,10 @@ mod tests {
             .iter()
             .map(|arg| Bytes::copy_from_slice(arg.as_bytes()))
             .collect::<Vec<_>>();
-        let reply = match engine.execute_at_time(&args, 1000).unwrap() {
+        let reply = match engine
+            .execute_at_time(&mut crate::engine::BoundCommand::bind(&args), 1000)
+            .unwrap()
+        {
             super::super::Execution::Reply(reply)
             | super::super::Execution::Pushed { reply, .. } => reply,
             _ => panic!("unexpected blocking search command"),

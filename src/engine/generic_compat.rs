@@ -64,7 +64,7 @@ pub(super) fn entry_mutations(key: &Bytes, entry: &Entry, now: i64) -> io::Resul
     match &entry.value {
         Value::String(value) => rows.push(Mutation::Set {
             key: key.clone(),
-            value: value.clone(),
+            value: value.bytes().clone(),
             expires_at: entry.expires_at,
         }),
         Value::List(values) => {
@@ -135,8 +135,8 @@ fn entry_object(entry: &Entry, now: i64, limit: usize) -> io::Result<Object> {
     let mut charge = |bytes: usize| budget.charge(1, bytes).map_err(|_| invalid());
     Ok(match &entry.value {
         Value::String(value) => {
-            charge(value.len())?;
-            Object::String(value.clone())
+            charge(value.bytes().len())?;
+            Object::String(value.bytes().clone())
         }
         Value::List(values) => {
             let mut rows = Vec::with_capacity(values.len().min(1024));
@@ -737,7 +737,7 @@ impl Engine {
     /// BY keys and selected GET keys actually read by the command.
     pub(crate) fn execute_sort_with_lookup(
         &mut self,
-        args: &[Bytes],
+        command: &mut super::BoundCommand<'_>,
         now: i64,
         mut lookup: impl FnMut(&Bytes, Option<&[u8]>, i64) -> Result<Option<Bytes>, Resp>,
     ) -> io::Result<Resp> {
@@ -745,13 +745,13 @@ impl Engine {
             self.pending_batch.is_none(),
             "drain the previous journal batch"
         );
-        self.prepare_replay_args(args);
-        let reply = match Self::validate(args) {
-            Ok(()) => self.cmd_sort_using(args, now, &mut lookup),
+        self.prepare_replay_args(command);
+        let reply = match command.check() {
+            Ok(()) => self.cmd_sort_using(command.args(), now, &mut lookup),
             Err(reply) => reply,
         };
         self.finish_search_changes(now);
-        self.finish_access_metadata(args, now);
+        self.finish_access_metadata(command, now);
         match self.take_failure() {
             Some(error) => Err(error),
             None => Ok(reply),
@@ -768,7 +768,7 @@ impl Engine {
     ) -> Option<Option<Bytes>> {
         let value = match self.value(key, now) {
             None => return None,
-            Some(Value::String(value)) if field.is_none() => Some(value.clone()),
+            Some(Value::String(value)) if field.is_none() => Some(value.bytes().clone()),
             Some(Value::Hash(value)) if field.is_some() => value
                 .snapshot(now)
                 .find(|(name, _, _)| name.as_ref() == field.expect("checked field"))

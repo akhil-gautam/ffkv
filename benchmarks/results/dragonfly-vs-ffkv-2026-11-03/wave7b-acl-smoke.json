@@ -1,0 +1,81 @@
+{
+  "harness": "/evidence/acl-freshness-smoke-2wj7nvd7/acl_freshness_smoke.py",
+  "binary": "/opt/ffkv-wave7b-combined",
+  "binary_sha256": "b701a75a87ba5136cbf327986913ca83afa9708351154cb91bad2e4c477f190d",
+  "tests_dir": "/repo/tests",
+  "server_args": [
+    "--shards",
+    "64"
+  ],
+  "consumers": 8,
+  "rounds": 48,
+  "scenarios": [
+    {
+      "name": "established_grants_revoke_restore",
+      "extends_existing": [
+        "server.feature:1031-1073 (single -get on one session)",
+        "server.feature:1076-1110 (off + PING)",
+        "server.feature:1113-1173 (password removal for NEW logins)",
+        "server.feature:1176-1287 (selectors/keys/channels on NEW sessions)",
+        "client_control_repair.feature:405-445 and transactions_runtime.feature:313-362 (EXEC recheck after one revoke)",
+        "workspace bound_command_smoke.py (+set grant on an established reader)"
+      ],
+      "status": "passed",
+      "error": null,
+      "step": "reset rule keeps identity",
+      "checks": 407,
+      "observed": {
+        "lua_nested_denial": "('error', b'NOPERM this user has no permissions to run this command or access its keys')",
+        "rpush_reply_with_waiter": "1"
+      }
+    },
+    {
+      "name": "delete_recreate_never_revives",
+      "extends_existing": [
+        "server.feature:1306-1346 and mcp_smoke.py:476-483 (DELUSER without an established session)",
+        "candidate unit test established_identities_end_when_deleted_recreated_or_reloaded_away (in-process, not wire)"
+      ],
+      "status": "passed",
+      "error": null,
+      "step": "recreated identity is usable, and dies on the next recreation",
+      "checks": 38,
+      "observed": {
+        "rpush_reply_with_deleted_waiter": "1"
+      }
+    },
+    {
+      "name": "acl_load_publication",
+      "extends_existing": [
+        "server.feature:1424-1484 (SAVE/LOAD restores a grant on an established session; restart)",
+        "server.feature:1410-1422 (LOAD without a configured file)"
+      ],
+      "status": "passed",
+      "error": null,
+      "step": "SETUSER and DELUSER after LOAD reach the new generation",
+      "checks": 51,
+      "observed": {}
+    },
+    {
+      "name": "default_user_semantics",
+      "extends_existing": [
+        "connections.feature:27-82 (password-only AUTH and configured default password)",
+        "security_smoke.py:291-313 (startup default nopass/password/absent)"
+      ],
+      "status": "passed",
+      "error": null,
+      "step": "default resetpass: established survives, no empty password",
+      "checks": 38,
+      "observed": {}
+    },
+    {
+      "name": "revoke_restore_rounds",
+      "extends_existing": [],
+      "status": "passed",
+      "error": null,
+      "step": "round 47 mode 2",
+      "checks": 867,
+      "observed": {}
+    }
+  ],
+  "ok": true
+}

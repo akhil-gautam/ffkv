@@ -1,9 +1,7 @@
 //! Soft sampled-process-RSS admission, not exact dataset accounting or eviction.
 //! The coordinator samples once per second; concurrent admitted work can overshoot.
 
-use bytes::Bytes;
-
-use crate::{engine::Engine, metrics::Metrics, protocol::Resp};
+use crate::{engine::BoundCommand, metrics::Metrics, protocol::Resp};
 
 #[derive(Clone, Copy)]
 pub struct Admission<'a> {
@@ -12,27 +10,41 @@ pub struct Admission<'a> {
 }
 
 impl Admission<'_> {
-    pub fn reject(&self, args: &[Bytes]) -> Option<Resp> {
-        if self.read_only && Engine::is_dataset_write(args) {
+    pub fn reject(&self, command: &BoundCommand<'_>) -> Option<Resp> {
+        if self.read_only && command.is_dataset_write() {
             return Some(Resp::Error(
                 "READONLY this development replica accepts no dataset writes".into(),
             ));
         }
-        self.reject_pressure(args)
+        self.reject_pressure(command)
     }
 
-    pub fn reject_pressure(&self, args: &[Bytes]) -> Option<Resp> {
-        if self.metrics.rss_pressure().rss_pressured && grows_dataset(args) {
-            return Some(Resp::Error(
-                "OOM command rejected by soft process-RSS write circuit breaker (--max-rss-bytes); sampled every 1s, not a hard memory cap or eviction policy".into(),
-            ));
-        }
-        None
+    #[inline]
+    pub fn reject_pressure(&self, command: &BoundCommand<'_>) -> Option<Resp> {
+        reject_pressure(self.metrics, command)
     }
 }
 
-fn grows_dataset(args: &[Bytes]) -> bool {
-    if !Engine::is_dataset_write(args) {
+/// [`Admission::reject_pressure`], without the replica role it ignores. Only
+/// a dataset write can grow the dataset, so no other command reads the sample.
+#[inline]
+pub fn reject_pressure(metrics: &Metrics, command: &BoundCommand<'_>) -> Option<Resp> {
+    if command.is_dataset_write() && metrics.rss_pressure().rss_pressured && grows_dataset(command)
+    {
+        return Some(out_of_memory());
+    }
+    None
+}
+
+#[cold]
+fn out_of_memory() -> Resp {
+    Resp::Error(
+        "OOM command rejected by soft process-RSS write circuit breaker (--max-rss-bytes); sampled every 1s, not a hard memory cap or eviction policy".into(),
+    )
+}
+
+fn grows_dataset(command: &BoundCommand<'_>) -> bool {
+    if !command.is_dataset_write() {
         return false;
     }
     // These commands remove existing data without inserting a destination value.
@@ -58,12 +70,19 @@ fn grows_dataset(args: &[Bytes]) -> bool {
         b"FQ.CANCEL",
     ]
     .iter()
-    .any(|name| args[0].eq_ignore_ascii_case(name))
+    .any(|name| command.args()[0].eq_ignore_ascii_case(name))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bytes::Bytes;
+
+    fn grows(command: &str) -> bool {
+        grows_dataset(&BoundCommand::bind(&[Bytes::copy_from_slice(
+            command.as_bytes(),
+        )]))
+    }
 
     #[test]
     fn pressure_preserves_reads_maintenance_and_reclamation_but_not_moves_or_scripts() {
@@ -92,10 +111,7 @@ mod tests {
             "BLPOP",
             "BRPOP",
         ] {
-            assert!(
-                !grows_dataset(&[Bytes::copy_from_slice(command.as_bytes())]),
-                "{command}"
-            );
+            assert!(!grows(command), "{command}");
         }
         for command in [
             "SET",
@@ -112,10 +128,7 @@ mod tests {
             "EVALSHA",
             "FQ.ENQUEUE",
         ] {
-            assert!(
-                grows_dataset(&[Bytes::copy_from_slice(command.as_bytes())]),
-                "{command}"
-            );
+            assert!(grows(command), "{command}");
         }
     }
 }

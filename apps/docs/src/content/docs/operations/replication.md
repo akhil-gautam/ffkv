@@ -33,6 +33,10 @@ target/release/ffkv-cli -3 -p 6384 ROLE
 
 Followership replaces stale local data; use a dedicated follower, never an unrelated existing dataset. `SLAVEOF` is the legacy spelling. Initial full synchronization transfers a bounded image, then live RESP effects. Reconnect can use partial synchronization when the requested history is still in the backlog; wrong/evicted history requires another full image. The default backlog is 64 MiB; `--replication-backlog-bytes` must be at least 1,024.
 
+A fresh standalone server **without `--data-dir`** initially reports `repl_backlog_active:0` and `master_repl_offset:0` in `INFO replication`, even after writes. Its first accepted replica synchronization activates history and changes `master_replid`; a request using the preactivation identifier must receive a full snapshot. That snapshot includes the earlier data, and later writes stream normally. Following an upstream or recovering a native position also activates history. Once activated, history remains active for that process's lifetime.
+
+Instances with a data directory start with history active, including after `CONFIG SET appendonly no`. Lazy history does not disable replication, mutation tracking or backups, and does not make ephemeral data durable.
+
 Upstream network access is deliberately constrained. Loopback needs the explicit `--native-replication-allow-loopback` opt-in. Cluster mode separately permits private upstream networking. On protected listeners configure the follower with `--native-replica-user`, `--native-replica-password-file`, `--native-replica-ca-file` and, when needed, `--native-replica-tls-name`. A username requires a password file and a TLS name requires a CA file. Use source ACL grants appropriate to replication; do not put upstream passwords into command arguments or URLs. RESP listener TLS and upstream verification are separate configurations.
 
 ## WAIT and WAITAOF belong to the writer connection
@@ -54,6 +58,10 @@ WAITAOF 1 1 2000
 `WAIT replicas timeout_ms` returns the number of connected replicas that processed this connection's write watermark. It is **not an fsync guarantee**. `WAITAOF numlocal numreplicas timeout_ms` returns `[local_count, replica_count]` for actual durable watermarks. The local threshold can be zero or one; requesting local durability with AOF disabled is an error. Both commands can time out with lower counts: inspect the returned counts, not merely whether the command returned successfully.
 
 Running SET in one one-shot invocation and WAIT in a new invocation does **not** wait for the first connection's write. Keep barriers on the writing application's connection as well. A processed ACK can satisfy WAIT while a replica fsync is still pending and WAITAOF reports zero durable replicas. A barrier does not undo the original write on timeout and does not eliminate ambiguous delivery outcomes or every failover-loss scenario.
+
+A replica must be online and have sent an ACK before satisfying a barrier, including a zero write watermark before history activation. SHUTDOWN's replication catch-up also requires an online ACK rather than treating an uninitialized zero offset as caught up.
+
+An unknown durable position is distinct from a durably acknowledged offset zero. ffkv counts a remote fsync only after a `FACK`; an ordinary `ACK 0` does not qualify. In particular, after writes made before lazy history activation, an AOF-disabled replica can satisfy WAIT after loading the snapshot but cannot satisfy WAITAOF. An offset-zero snapshot installed while fsync is held also advertises no durable acknowledgement until durability is established.
 
 ## State and handoff
 

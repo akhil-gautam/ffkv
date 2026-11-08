@@ -33,7 +33,7 @@ Stop with Ctrl-C, then repeat the server command using the **same directory**. T
 | Every second | `--data-dir DIR --durability everysec` | Appended/flushed before reply; fsync targets a one-second cadence. OS/storage failure can lose recent acknowledged writes; load and slow storage can extend the window. |
 | Volatile | No `--data-dir` | No restart survival. |
 
-These describe the normal append-only-enabled configuration. `--appendonly false` and runtime persistence configuration can disable AOF; do not assume a directory alone guarantees ongoing journaling after configuration changes. Inspect `CONFIG GET appendonly appendfsync` and `FFKV.STATS`. Persisted `CONFIG REWRITE` values can override startup flags; see [configuration](/reference/configuration/).
+These describe the normal append-only-enabled configuration. `--appendonly false` and runtime persistence configuration can disable AOF; do not assume a directory alone guarantees ongoing journaling after configuration changes. Inspect `CONFIG GET appendonly appendfsync` and `FFKV.STATS`. Re-enabling AOF applies the configured `appendfsync`, including a change made while AOF was off. Persisted `CONFIG REWRITE` values can override startup flags; see [configuration](/reference/configuration/).
 
 Ctrl-C and SIGTERM synchronize pending WAL data before exit. Any live WAL append/flush/fsync failure stops the server rather than allowing unjournaled changes to leak into later reads. A lost reply is an **unknown outcome**, not evidence that a mutation failed.
 

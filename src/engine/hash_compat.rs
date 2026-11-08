@@ -4,10 +4,10 @@ use bytes::Bytes;
 use rand::{Rng, seq::index};
 
 use super::super::{
-    CommandSpec, Engine, Entry, Mutation, Resp, Value, array, error, integer, integer_error,
-    syntax_error, wrong_arity,
+    CommandSpec, Engine, Entry, Mutation, Resp, StringValue, StringWrite, Value, array, error,
+    integer, integer_error, syntax_error, wrong_arity,
 };
-use super::{HashValue, field_arguments, field_deadline};
+use super::{FieldTtl, HashValue, field_arguments, field_deadline};
 
 pub(in crate::engine) static COMMANDS: &[CommandSpec] = &[
     CommandSpec::handler(
@@ -197,20 +197,27 @@ impl Engine {
                 }
                 fields.clone()
             };
+            let capture = self.capturing_changes();
+            let mut rows = Vec::with_capacity(if capture { fields.len() } else { 0 });
             let mut hash = HashValue {
                 fields: std::collections::HashMap::with_capacity(fields.len()),
                 random_fields: Vec::with_capacity(fields.len()),
                 ..HashValue::default()
             };
+            // Fieldset names are already distinct engine copies (PREPARE).
             for (field, value) in fields.iter().zip(&args[4..]) {
-                hash.set(field.clone(), Bytes::copy_from_slice(value), None);
+                let (value, captured) = StringValue::new(StringWrite::Copy(value), capture);
+                hash.insert_new(field.clone(), value, None);
+                if let Some(captured) = captured {
+                    rows.push((field.clone(), captured, None));
+                }
             }
             let existed = self.remove(&args[2]).is_some();
             let key = self.own_key(&args[2]);
             self.write_entry(
                 key,
                 Entry {
-                    value: Value::Hash(hash),
+                    value: Value::Hash(Box::new(hash)),
                     expires_at: None,
                     access: crate::engine::AccessMetadata::default(),
                 },
@@ -221,7 +228,7 @@ impl Engine {
                     key: args[2].clone(),
                 });
             }
-            self.record_hash_fields(&args[2], fields.iter(), now);
+            self.record_hash_rows(&args[2], rows, now);
             return Resp::Simple("OK");
         }
         let Some(fieldsets) = self.command_hash_fieldsets() else {
@@ -322,7 +329,8 @@ impl Engine {
             } else {
                 None
             };
-            if let Err(reply) = budget.charge(1, value.map_or(0, |value| value.value.len())) {
+            if let Err(reply) = budget.charge(1, value.map_or(0, |value| value.value.bytes().len()))
+            {
                 return reply;
             }
         }
@@ -338,23 +346,30 @@ impl Engine {
             unreachable!();
         };
         for field in fields {
-            let value = hash.fields.get(field).map(|value| value.value.clone());
-            if value.is_some() {
-                if removing {
-                    hash.remove(field);
+            let value = if removing {
+                hash.detach(field).map(|(owned, removed)| {
                     if journal {
-                        changed.push(field.clone());
+                        changed.push(owned);
                     }
-                } else if persist || expiration.is_some() {
-                    let deadline = if persist { None } else { expiration };
-                    if hash.fields.get(field).expect("existing field").expires_at != deadline {
-                        hash.set_expiry(field, deadline);
-                        if journal {
-                            changed.push(field.clone());
+                    removed.value.into_bytes()
+                })
+            } else {
+                match hash.fields.get(field) {
+                    None => None,
+                    Some(current) => {
+                        let value = current.value.bytes().clone();
+                        let expires_at = current.expires_at;
+                        let deadline = if persist { None } else { expiration };
+                        if (persist || expiration.is_some()) && expires_at != deadline {
+                            let position = hash.set_expiry(field, deadline);
+                            if journal {
+                                changed.push(hash.random_fields[position].clone());
+                            }
                         }
+                        Some(value)
                     }
                 }
-            }
+            };
             result.push(Resp::Bulk(value));
         }
         self.finish_hash_mutation(&args[1], previous);
@@ -377,14 +392,14 @@ impl Engine {
             Ok(value) => value,
             Err(reply) => return reply,
         };
-        let (old, deadline) = match self.hash_value(&args[1], now) {
+        let old = match self.hash_value(&args[1], now) {
             Err(reply) => return reply,
             Ok(hash) => match hash.and_then(|hash| hash.fields.get(&args[2])) {
-                Some(field) => match parse_float(&field.value) {
-                    Ok(value) => (value, field.expires_at),
+                Some(field) => match parse_float(field.value.bytes()) {
+                    Ok(value) => value,
                     Err(_) => return error("ERR hash value is not a float"),
                 },
-                None => (parse_float(b"0").expect("zero float"), None),
+                None => parse_float(b"0").expect("zero float"),
             },
         };
         let value = match add_float(old, increment) {
@@ -396,19 +411,17 @@ impl Engine {
             return reply;
         }
         let previous = self.hash_deadline(&args[1]);
+        let journal = self.capturing_changes();
         let Value::Hash(hash) =
-            self.collection_entry(&args[1], now, || Value::Hash(HashValue::default()))
+            self.collection_entry(&args[1], now, || Value::Hash(Box::default()))
         else {
             unreachable!();
         };
-        let field = hash
-            .fields
-            .get_key_value(&args[2])
-            .map(|(field, _)| field.clone())
-            .unwrap_or_else(|| Bytes::copy_from_slice(&args[2]));
-        hash.set(field, value.clone(), deadline);
+        let written =
+            hash.write_field(&args[2], StringWrite::Copy(&value), FieldTtl::Keep, journal);
+        let row = hash.written_row(written);
         self.finish_hash_mutation(&args[1], previous);
-        self.record_hash_fields(&args[1], std::iter::once(&args[2]), now);
+        self.record_hash_rows(&args[1], row.into_iter().collect(), now);
         Resp::Bulk(Some(value))
     }
 
@@ -474,7 +487,12 @@ impl Engine {
             Vec::with_capacity(length.saturating_mul(if with_values && !resp3 { 2 } else { 1 }));
         let mut append = |position: usize| -> Result<(), Resp> {
             let field = &hash.random_fields[position];
-            let value = &hash.fields.get(field).expect("indexed hash field").value;
+            let value = hash
+                .fields
+                .get(field)
+                .expect("indexed hash field")
+                .value
+                .bytes();
             budget.charge(
                 0,
                 field

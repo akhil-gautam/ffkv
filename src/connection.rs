@@ -1,10 +1,10 @@
-use std::{mem, sync::Arc};
+use std::{mem, sync::Arc, time::Instant};
 
 use bytes::Bytes;
 
 use crate::{
     auth::{Acl, User},
-    engine::Engine,
+    engine::BoundCommand,
     protocol::{Resp, Version},
     state::{ClientLease, State},
     watch::Token,
@@ -25,10 +25,8 @@ pub enum Action {
     Reply(Resp),
     NoReply,
     Close,
-    Command(
-        Vec<Bytes>,
-        Option<crate::server_commands::extensions::Invocation>,
-    ),
+    /// Runs the routed arguments, which stay with the caller.
+    Command(Option<crate::server_commands::extensions::Invocation>),
     Watch(Vec<Bytes>),
     Unblock {
         id: u64,
@@ -48,11 +46,18 @@ pub struct Connection {
     pub session: Arc<crate::session::ClientSession>,
     pub native: crate::native_replication::ClientState,
     pub cluster: crate::cluster::ClusterClient,
+    /// Shard pool for inline single-shard execution. Shutdown closes the pool
+    /// itself, so holding it never delays the actor's drain.
+    pub pool: Option<Arc<crate::sharding::Pool>>,
     state: Arc<State>,
     transaction: Option<Transaction>,
     watched: Vec<Token>,
     acl: Option<Arc<Acl>>,
+    /// The directory snapshot this connection holds: its identity, and the
+    /// one whose supersession `route` checks.
     user: Option<Arc<User>>,
+    /// This connection's own handle on `user`, passed with its commands.
+    principal: Option<Arc<User>>,
     failed_auth: u8,
     pub subscription: crate::pubsub::Subscription,
 }
@@ -65,6 +70,27 @@ fn printable(value: &[u8]) -> bool {
 }
 fn bulk(value: &'static str) -> Resp {
     Resp::Bulk(Some(Bytes::from_static(value.as_bytes())))
+}
+/// The name `CLIENT LIST` shows: a registered root's canonical lowercase name
+/// without allocating, else the binary-safe ASCII-lowercase first argument, or
+/// empty for an empty command.
+fn command_name(bound: &BoundCommand<'_>) -> Bytes {
+    match bound.root_name() {
+        Some(name) => Bytes::from_static(name.as_bytes()),
+        None => bound
+            .args()
+            .first()
+            .map(|name| Bytes::from(name.to_ascii_lowercase()))
+            .unwrap_or_default(),
+    }
+}
+
+/// A connection's own handle on `user`: the same policy and identity in an
+/// allocation of its own. Commands carry, and so reference-count, this handle
+/// rather than the directory's snapshot, which every connection of that user
+/// shares across threads.
+fn principal(user: Option<&Arc<User>>) -> Option<Arc<User>> {
+    user.map(|user| Arc::new(User::clone(user)))
 }
 
 impl Connection {
@@ -80,6 +106,7 @@ impl Connection {
         session.acl = acl.clone();
         session.clients = Some(state.client_registry.clone());
         let session = Arc::new(session);
+        let principal = principal(user.as_ref());
         Self {
             version: Version::Resp2,
             lease,
@@ -87,11 +114,13 @@ impl Connection {
             session,
             native: crate::native_replication::ClientState::default(),
             cluster: crate::cluster::ClusterClient::default(),
+            pool: state.pool.get().and_then(std::sync::Weak::upgrade),
             state,
             transaction: None,
             watched: Vec::new(),
             acl,
             user,
+            principal,
             failed_auth: 0,
             subscription,
         }
@@ -102,7 +131,7 @@ impl Connection {
     }
 
     pub fn user(&self) -> Option<Arc<User>> {
-        self.user.clone()
+        self.principal.clone()
     }
     pub fn audit(&self) -> Option<crate::auth::Audit<'_>> {
         Some(crate::auth::Audit {
@@ -140,7 +169,8 @@ impl Connection {
         Action::Reply(reply)
     }
 
-    fn queue(&mut self, args: Vec<Bytes>) -> Action {
+    /// Queued commands outlive the request, so only an accepted one is copied.
+    fn queue(&mut self, args: &[Bytes]) -> Action {
         let transaction = self.transaction.as_mut().expect("active transaction");
         let bytes: usize = args.iter().map(Bytes::len).sum();
         if transaction.commands.len() == MAX_QUEUED_COMMANDS
@@ -153,7 +183,7 @@ impl Connection {
             return Action::Reply(error("ERR transaction queue limit exceeded"));
         }
         transaction.bytes += bytes;
-        transaction.commands.push(args);
+        transaction.commands.push(args.to_vec());
         Action::Reply(Resp::Simple("QUEUED"))
     }
 
@@ -181,6 +211,7 @@ impl Connection {
         self.lease
             .set_user(Some(Bytes::copy_from_slice(user.name().as_bytes())));
         self.control.set_field("user", user.name().to_owned());
+        self.principal = principal(Some(&user));
         self.user = Some(user);
         self.state.client_registry.reset_tracking(self.lease.id);
         self.failed_auth = 0;
@@ -225,12 +256,24 @@ impl Connection {
         }
     }
 
-    pub fn route(&mut self, args: Vec<Bytes>) -> Action {
-        self.lease.seen();
-        self.control.seen(&args);
-        if let (Some(acl), Some(user)) = (&self.acl, &self.user) {
+    /// Raw-name checks keep their precedence ahead of registry validation,
+    /// which `bound` remembers for the caller's later phases. `observed_at` is
+    /// the request's post-pause start, both activity views' latest interaction.
+    pub fn route(&mut self, bound: &mut BoundCommand<'_>, observed_at: Instant) -> Action {
+        let args = bound.args();
+        self.lease.seen(observed_at);
+        self.control.seen(command_name(bound), observed_at);
+        // The held snapshot stays authoritative until the directory supersedes
+        // it; only then is its name looked up again. That lookup includes off
+        // users: off blocks new authentication, not established identities.
+        if let (Some(acl), Some(user)) = (&self.acl, &self.user)
+            && user.superseded()
+        {
             match acl.user(user.name()) {
-                Some(fresh) if user.same_identity(&fresh) => self.user = Some(fresh),
+                Some(fresh) if user.same_identity(&fresh) => {
+                    self.principal = principal(Some(&fresh));
+                    self.user = Some(fresh);
+                }
                 _ => {
                     self.state.pubsub.disconnect(self.lease.id);
                     return Action::NoReply;
@@ -275,10 +318,10 @@ impl Connection {
             ));
         }
         if command.eq_ignore_ascii_case(b"AUTH") {
-            return Action::Reply(self.authenticate(&args));
+            return Action::Reply(self.authenticate(args));
         }
         if command.eq_ignore_ascii_case(b"HELLO") {
-            return Action::Reply(self.hello(&args));
+            return Action::Reply(self.hello(bound));
         }
         if command.eq_ignore_ascii_case(b"RESET") && args.len() == 1 {
             self.transaction = None;
@@ -295,6 +338,7 @@ impl Connection {
             self.lease.set_library(true, Bytes::new());
             self.lease.set_library(false, Bytes::new());
             self.user = self.acl.as_ref().and_then(|acl| acl.default_user());
+            self.principal = principal(self.user.as_ref());
             let username = self
                 .user
                 .as_ref()
@@ -312,12 +356,12 @@ impl Connection {
         if !self.authenticated() {
             return self.reject(error("NOAUTH Authentication required."));
         }
-        if !Engine::command_exists(command) {
+        if !bound.exists() {
             let invocation = match self
                 .state
                 .server
                 .get()
-                .and_then(|server| server.extensions().prepare_sync(&args))
+                .and_then(|server| server.extensions().prepare_sync(args))
             {
                 Some(Ok(invocation)) => invocation,
                 Some(Err(reply)) => return self.reject(reply),
@@ -340,23 +384,22 @@ impl Connection {
                 }
                 return self.queue(args);
             }
-            return Action::Command(args, Some(invocation));
+            return Action::Command(Some(invocation));
         }
         let validation = if self.transaction.is_some() {
-            Engine::validate_admission(&args)
+            bound.admit()
         } else {
-            Engine::validate(&args)
+            bound.check()
         };
         if let Err(reply) = validation {
             return self.reject(reply);
         }
         if let Some(user) = &self.user
-            && let Err(reply) =
-                Engine::authorize_admission_logged(&args, user, self.audit().as_ref())
+            && let Err(reply) = bound.authorize(user, self.audit().as_ref())
         {
             return self.reject(reply);
         }
-        if self.transaction.is_some() && !Engine::transaction_allowed(&args) {
+        if self.transaction.is_some() && !bound.transaction_allowed() {
             return self.reject(error("ERR Command not allowed inside a transaction"));
         }
         let subscription_command = [
@@ -376,9 +419,9 @@ impl Connection {
                 ));
             }
             if command.eq_ignore_ascii_case(b"SSUBSCRIBE") && self.state.cluster.get().is_some() {
-                return Action::Command(args, None);
+                return Action::Command(None);
             }
-            return match self.subscription.command(&args) {
+            return match self.subscription.command(args) {
                 Ok(()) => Action::NoReply,
                 Err(reply) => Action::Reply(reply),
             };
@@ -418,7 +461,7 @@ impl Connection {
             return Action::Transaction {
                 commands: transaction.commands,
                 watched,
-                user: self.user.clone(),
+                user: self.principal.clone(),
             };
         }
         if command.eq_ignore_ascii_case(b"DISCARD") && args.len() == 1 {
@@ -436,7 +479,7 @@ impl Connection {
             if args.len() - 1 + self.watched.len() > MAX_WATCHED_KEYS {
                 return Action::Reply(error("ERR too many watched keys"));
             }
-            return Action::Watch(args.into_iter().skip(1).collect());
+            return Action::Watch(args[1..].to_vec());
         }
         if command.eq_ignore_ascii_case(b"UNWATCH") && args.len() == 1 && self.transaction.is_none()
         {
@@ -494,15 +537,16 @@ impl Connection {
                     error: is_error,
                 };
             }
-            return Action::Reply(self.client(&args));
+            return Action::Reply(self.client(args));
         }
         if command.eq_ignore_ascii_case(b"ACL") {
-            return Action::Command(args, None);
+            return Action::Command(None);
         }
-        Action::Command(args, None)
+        Action::Command(None)
     }
 
-    fn hello(&mut self, args: &[Bytes]) -> Resp {
+    fn hello(&mut self, bound: &mut BoundCommand<'_>) -> Resp {
+        let args = bound.args();
         let mut version = self.version;
         let mut name = None;
         let mut user = None;
@@ -542,7 +586,9 @@ impl Connection {
         }
         // Validate the complete candidate before committing any connection state.
         if let Some(candidate) = user.as_ref().or(self.user.as_ref())
-            && let Err(reply) = Engine::authorize_logged(args, candidate, self.audit().as_ref())
+            && let Err(reply) = bound
+                .check()
+                .and_then(|()| bound.authorize(candidate, self.audit().as_ref()))
         {
             return reply;
         }
@@ -646,12 +692,113 @@ mod frontend_tests {
             .collect()
     }
 
+    fn route(connection: &mut Connection, values: &[&str]) -> Action {
+        let args = args(values);
+        connection.route(&mut BoundCommand::bind(&args), Instant::now())
+    }
+
     fn connection(state: Arc<State>) -> Connection {
         let lease = state.register(
             "127.0.0.1:40000".parse().unwrap(),
             "127.0.0.1:6379".parse().unwrap(),
         );
         Connection::new(lease, state, None)
+    }
+
+    /// Runs a space-separated ACL command as the default user.
+    fn acl_command(acl: &Acl, command: &str) -> Resp {
+        let words: Vec<&str> = command.split(' ').collect();
+        acl.execute(&args(&words), "default", |_, _| Ok(()), |_| Vec::new())
+    }
+
+    fn established(state: &Arc<State>, acl: &Arc<Acl>, name: &str, port: u16) -> Connection {
+        let lease = state.register(
+            format!("127.0.0.1:{port}").parse().unwrap(),
+            "127.0.0.1:6379".parse().unwrap(),
+        );
+        let mut connection = Connection::new(lease, state.clone(), Some(acl.clone()));
+        assert!(matches!(
+            route(&mut connection, &["AUTH", name, "secret"]),
+            Action::Reply(Resp::Simple("OK"))
+        ));
+        assert!(matches!(
+            route(&mut connection, &["GET", "key"]),
+            Action::Command(None)
+        ));
+        connection
+    }
+
+    #[test]
+    fn established_identities_end_when_deleted_recreated_or_reloaded_away() {
+        let name = format!("ffkv-acl-route-{}", std::process::id());
+        let path = std::env::temp_dir().join(name);
+        let users = "user default on nopass +@all ~* &*\n\
+                     user alice on >secret +@all ~*\n\
+                     user bob on >secret +@all ~*\n";
+        std::fs::write(&path, users).unwrap();
+        let acl = Arc::new(Acl::load(&path).unwrap());
+        let state = Arc::new(State::new(6379, 1, false));
+        let mut alice = established(&state, &acl, "alice", 40001);
+        let mut bob = established(&state, &acl, "bob", 40002);
+        // A same-named replacement is a new identity, never a revival.
+        assert_eq!(acl_command(&acl, "ACL DELUSER alice"), Resp::Integer(1));
+        assert_eq!(
+            acl_command(&acl, "ACL SETUSER alice on >secret +@all ~*"),
+            Resp::Simple("OK")
+        );
+        assert!(matches!(
+            route(&mut alice, &["GET", "key"]),
+            Action::NoReply
+        ));
+        assert!(matches!(
+            route(&mut bob, &["GET", "key"]),
+            Action::Command(None)
+        ));
+        std::fs::write(&path, "user default on nopass +@all ~* &*\n").unwrap();
+        let reloaded = acl_command(&acl, "ACL LOAD");
+        std::fs::remove_file(&path).unwrap();
+        assert_eq!(reloaded, Resp::Simple("OK"));
+        assert!(matches!(route(&mut bob, &["GET", "key"]), Action::NoReply));
+    }
+
+    #[test]
+    fn commands_carry_the_current_rules_of_the_identity_the_connection_holds() {
+        let acl = Arc::new(Acl::new());
+        let state = Arc::new(State::new(6379, 1, false));
+        assert_eq!(
+            acl_command(&acl, "ACL SETUSER alice on >secret +@all ~*"),
+            Resp::Simple("OK")
+        );
+        let mut alice = established(&state, &acl, "alice", 40003);
+        let key = Bytes::from_static(b"key");
+        let allowed = |connection: &Connection| {
+            connection
+                .user()
+                .expect("an authenticated identity")
+                .authorize(b"get", &["read"], std::slice::from_ref(&key), false)
+                .is_ok()
+        };
+        assert!(allowed(&alice));
+        assert_eq!(
+            acl_command(&acl, "ACL SETUSER alice resetkeys ~other:*"),
+            Resp::Simple("OK")
+        );
+        // The next command adopts the replacement, and so do the commands it
+        // hands on.
+        assert!(matches!(
+            route(&mut alice, &["GET", "key"]),
+            Action::Reply(Resp::Error(_))
+        ));
+        assert!(!allowed(&alice));
+        let current = acl.user("alice").unwrap();
+        assert!(alice.user().unwrap().same_identity(&current));
+        // RESET returns to the default user for both.
+        assert!(matches!(
+            route(&mut alice, &["RESET"]),
+            Action::Reply(Resp::Simple("RESET"))
+        ));
+        assert!(allowed(&alice));
+        assert_eq!(alice.user().unwrap().name(), "default");
     }
 
     #[test]
@@ -665,7 +812,7 @@ mod frontend_tests {
         assert!(state.admin_runtime.set(runtime.clone()).is_ok());
         let mut connection = connection(state);
         assert!(matches!(
-            connection.route(args(&["SELECT", "23"])),
+            route(&mut connection, &["SELECT", "23"]),
             Action::Reply(Resp::Simple("OK"))
         ));
         assert_eq!(connection.session.database(), 23);
@@ -673,18 +820,18 @@ mod frontend_tests {
             .databases
             .store(24, std::sync::atomic::Ordering::Release);
         assert!(matches!(
-            connection.route(args(&["SELECT", "24"])),
+            route(&mut connection, &["SELECT", "24"]),
             Action::Reply(Resp::Error(_))
         ));
         assert!(matches!(
-            connection.route(args(&["CLIENT", "NO-TOUCH", "ON"])),
+            route(&mut connection, &["CLIENT", "NO-TOUCH", "ON"]),
             Action::Reply(Resp::Simple("OK"))
         ));
         connection.cluster.readonly = true;
         connection.cluster.asking = true;
         connection.native.listening_port = 1234;
         assert!(matches!(
-            connection.route(args(&["RESET"])),
+            route(&mut connection, &["RESET"]),
             Action::Reply(Resp::Simple("RESET"))
         ));
         assert_eq!(connection.session.database(), 0);
@@ -696,6 +843,22 @@ mod frontend_tests {
         );
         assert!(!connection.cluster.readonly && !connection.cluster.asking);
         assert_eq!(connection.native.listening_port, 0);
+    }
+
+    #[test]
+    fn client_list_shows_each_routed_command_by_its_lowercase_name() {
+        let state = Arc::new(State::new(6379, 1, false));
+        let mut connection = connection(state.clone());
+        let mut listed = |args: Vec<Bytes>| {
+            connection.route(&mut BoundCommand::bind(&args), Instant::now());
+            String::from_utf8_lossy(&state.client_registry.list(None, None)).into_owned()
+        };
+        assert!(listed(args(&["GeT", "key"])).contains(" cmd=get "));
+        assert!(listed(args(&["Config", "GET", "port"])).contains(" cmd=config "));
+        assert!(listed(args(&["CONFIG|GET", "port"])).contains(" cmd=config|get "));
+        let binary = vec![Bytes::from_static(b"No\xffSuch")];
+        assert!(listed(binary).contains(" cmd=no\u{fffd}such "));
+        assert!(listed(Vec::new()).contains(" cmd= "));
     }
 
     #[test]

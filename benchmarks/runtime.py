@@ -1,4 +1,5 @@
 """Standard-library RESP, owned-process and current-RSS helpers for real workloads."""
+import argparse
 import contextlib
 import json
 import math
@@ -6,6 +7,7 @@ import os
 from pathlib import Path
 import platform
 import re
+import shutil
 import signal
 import socket
 import subprocess
@@ -120,9 +122,14 @@ def current_rss(pid):
 
 
 def environment():
+    runtime_variables = ("TOKIO_WORKER_THREADS", "LD_PRELOAD", "LD_LIBRARY_PATH",
+                         "DYLD_INSERT_LIBRARIES", "DYLD_LIBRARY_PATH",
+                         "MALLOC_CONF", "GLIBC_TUNABLES")
     return {"os": platform.platform(), "machine": platform.machine(),
-            "python": platform.python_version(), "client": "stdlib RESP2 runtime.py", 
-            "cpu_count": os.cpu_count()}
+            "python": platform.python_version(), "client": "stdlib RESP2 runtime.py",
+            "cpu_count": os.cpu_count(),
+            "runtime_environment": {name: os.environ[name] for name in runtime_variables
+                                    if name in os.environ}}
 
 
 def version(binary):
@@ -135,19 +142,153 @@ def version(binary):
         return {"error": str(error)}
 
 
+def parse_cpu_list(text):
+    """Parse a Linux cpu list such as '0-3,8'; reject empty, reversed or duplicate ids."""
+    cpus = []
+    for part in str(text).split(","):
+        part = part.strip()
+        match = re.fullmatch(r"(\d+)(?:-(\d+))?", part)
+        if not match:
+            raise ValueError(f"invalid cpu list element: {part!r}")
+        low = int(match.group(1))
+        high = int(match.group(2)) if match.group(2) is not None else low
+        if high < low:
+            raise ValueError(f"reversed cpu range: {part!r}")
+        cpus.extend(range(low, high + 1))
+    if not cpus or len(set(cpus)) != len(cpus):
+        raise ValueError(f"empty or duplicate cpu list: {text!r}")
+    return sorted(cpus)
+
+
+def cpu_list_argument(text):
+    """argparse type wrapper for parse_cpu_list."""
+    try:
+        return parse_cpu_list(text)
+    except ValueError as error:
+        raise argparse.ArgumentTypeError(str(error))
+
+
+def affinity_error(server_cpus, client_cpus):
+    """Validate optional Linux pinning before any process (including this one) is pinned."""
+    if server_cpus is None and client_cpus is None:
+        return None
+    if platform.system() != "Linux":
+        return "--server-cpus/--client-cpus require Linux taskset"
+    if shutil.which("taskset") is None:
+        return "--server-cpus/--client-cpus require taskset on PATH"
+    allowed = os.sched_getaffinity(0)
+    for flag, cpus in (("--server-cpus", server_cpus), ("--client-cpus", client_cpus)):
+        if cpus is not None and not set(cpus) <= allowed:
+            return f"{flag} {cpus} outside harness affinity {sorted(allowed)}"
+    if server_cpus and client_cpus and set(server_cpus) & set(client_cpus):
+        return "--server-cpus and --client-cpus must be disjoint"
+    return None
+
+
+def linux_observations():
+    """Harness affinity, cgroup CPU/memory limits, kernel and CPU model; never fatal."""
+    linux = {"harness_affinity": sorted(os.sched_getaffinity(0))}
+    for name, path in (("kernel", "/proc/sys/kernel/osrelease"),
+                       ("cgroup_cpuset_effective", "/sys/fs/cgroup/cpuset.cpus.effective"),
+                       ("cgroup_cpu_max", "/sys/fs/cgroup/cpu.max"),
+                       ("cgroup_memory_max", "/sys/fs/cgroup/memory.max")):
+        try:
+            linux[name] = Path(path).read_text().strip()
+        except OSError as error:
+            linux[name] = {"unavailable": str(error)}
+    try:
+        models = {line.split(":", 1)[1].strip() for line in Path("/proc/cpuinfo").read_text().splitlines()
+                  if line.lower().startswith(("model name", "cpu part", "hardware"))}
+        linux["cpuinfo_models"] = sorted(models)
+    except OSError as error:
+        linux["cpuinfo_models"] = {"unavailable": str(error)}
+    return linux
+
+
+def affinity_prefix(cpus):
+    """taskset sets affinity then execs, so the Popen PID becomes the target program."""
+    if cpus is None:
+        return []
+    if platform.system() != "Linux":
+        raise RuntimeError("CPU affinity requires Linux taskset")
+    taskset = shutil.which("taskset")
+    if taskset is None:
+        raise FileNotFoundError("taskset executable not found")
+    return [taskset, "-c", ",".join(str(cpu) for cpu in cpus)]
+
+
+ENGINE_KINDS = ("ffkv", "redis", "dragonfly")
+ENGINE_MODES = {"ffkv": ("memory", "everysec", "strict"),
+                "redis": ("memory", "everysec", "strict"),
+                "dragonfly": ("memory",)}
+UNSUPPORTED = {
+    ("dragonfly", mode): {
+        "reason": ("Dragonfly has no append-only file or per-write/per-second local fsync; "
+                   "point-in-time snapshots (SAVE/BGSAVE, --snapshot_cron, --dbfilename) and "
+                   "the in-memory replication journal are not equivalent to " + mode
+                   + " acknowledged-write durability, so no comparison is run."),
+        "evidence": [
+            "https://www.dragonflydb.io/docs/managing-dragonfly/flags (dbfilename, dir, snapshot_cron; no appendonly/appendfsync flags)",
+            "https://github.com/dragonflydb/dragonfly/blob/v2.0.2/src/server/server_family.cc (flags dir/dbfilename/snapshot_cron; Shutdown saves only when dbfilename is non-empty)",
+        ]}
+    for mode in ("everysec", "strict")}
+
+
+def dragonfly_args(threads):
+    """The only Dragonfly tuning flag; memory-mode flags are fixed in OwnedServer."""
+    return [f"--proactor_threads={threads}"]
+
+
+def dragonfly_settings(client, server, threads):
+    """Memory-only Dragonfly: snapshot load/save and periodic snapshots disabled, owned dir."""
+    expected = {"dbfilename": "", "snapshot_cron": "", "dir": str(server.directory)}
+    result = {"expected": expected, "actual": {}, "ok": False,
+              "source": "CONFIG GET of registered flags, INFO persistence, INFO server thread_count, owned CLI",
+              "snapshot_on_shutdown": "disabled: Shutdown saves only when dbfilename is non-empty",
+              "durability": "none; no crash-recovery claim"}
+    for setting in expected:
+        reply = client.command("CONFIG", "GET", setting)
+        if not isinstance(reply, list) or len(reply) != 2 or reply[0] != setting.encode():
+            raise AssertionError(f"CONFIG GET {setting}: {reply!r}")
+        result["actual"][setting] = reply[1].decode()
+    raw = client.command("INFO", "persistence")
+    result["info_persistence"] = info_fields(raw)
+    observed = (server.identity or {}).get("thread_count")
+    result["proactor_threads"] = {
+        "requested": threads, "info_server_thread_count": observed, "source": "INFO server thread_count",
+        "status": ("verified" if observed is not None and observed.strip().isdigit() and int(observed) == threads
+                   else "mismatch" if observed is not None else "missing")}
+    result["ok"] = (result["actual"] == expected
+                    and result["info_persistence"].get("rdb_bgsave_in_progress", "0") == "0"
+                    and result["proactor_threads"]["status"] == "verified")
+    return result
+
+
 class OwnedServer:
-    """Only signal our Popen child; all logs and data live in an owned directory."""
+    """Only signal our Popen child; all logs and data live in an owned directory.
+
+    Redis and Dragonfly must report INFO server process_id equal to the spawned PID,
+    so a reserved port that was raced by another listener is rejected, never used.
+    """
     def __init__(self, binary, directory, kind="ffkv", mode="memory", storage="memory",
-                 timeout=15, extra_args=()):
+                 timeout=15, extra_args=(), cpus=None):
+        if kind not in ENGINE_KINDS:
+            raise ValueError(f"unknown server kind: {kind}")
+        if kind == "dragonfly" and mode != "memory":
+            raise ValueError("dragonfly has no local append-only fsync mode; only memory is supported")
         self.binary = str(binary)
         self.directory = Path(directory)
         self.kind, self.mode, self.storage = kind, mode, storage
         self.timeout = timeout
         self.extra_args = list(extra_args)
+        self.cpus = None if cpus is None else sorted(cpus)
         self.process = None
         self.log = None
         self.address = None
         self.command_line = None
+        self.server_args = None
+        self.identity = None
+        self.affinity = None
 
     def start(self):
         self.directory.mkdir(parents=True, exist_ok=True)
@@ -161,15 +302,24 @@ class OwnedServer:
                 reservation.bind(("127.0.0.1", 0))
                 port = reservation.getsockname()[1]
             self.address = ("127.0.0.1", port)
-            args = [self.binary, "--bind", "127.0.0.1", "--port", str(port),
-                    "--protected-mode", "yes", "--dir", str(self.directory),
-                    "--save", "", "--appendonly", "no" if self.mode == "memory" else "yes",
-                    "--appendfsync", "always" if self.mode == "strict" else "everysec",
-                    "--no-appendfsync-on-rewrite", "no", "--auto-aof-rewrite-percentage", "0"]
-        self.command_line = args
+            if self.kind == "redis":
+                args = [self.binary, "--bind", "127.0.0.1", "--port", str(port),
+                        "--protected-mode", "yes", "--dir", str(self.directory),
+                        "--save", "", "--appendonly", "no" if self.mode == "memory" else "yes",
+                        "--appendfsync", "always" if self.mode == "strict" else "everysec",
+                        "--no-appendfsync-on-rewrite", "no", "--auto-aof-rewrite-percentage", "0"]
+            else:
+                # Empty dbfilename disables both startup load and shutdown save; empty
+                # snapshot_cron disables periodic snapshots; version_check avoids network I/O.
+                args = [self.binary, "--bind=127.0.0.1", f"--port={port}",
+                        f"--dir={self.directory}", "--dbfilename=", "--snapshot_cron=",
+                        "--version_check=false", "--logtostderr"]
+            args += self.extra_args
+        self.server_args = args
+        self.command_line = affinity_prefix(self.cpus) + args
         self.log = tempfile.TemporaryFile(mode="w+b")
         try:
-            self.process = subprocess.Popen(args, stdout=self.log, stderr=self.log)
+            self.process = subprocess.Popen(self.command_line, stdout=self.log, stderr=self.log)
             deadline = time.monotonic() + self.timeout
             while time.monotonic() < deadline:
                 if self.process.poll() is not None:
@@ -187,15 +337,36 @@ class OwnedServer:
                             if self.kind != "ffkv":
                                 info = info_fields(client.command("INFO", "server"))
                                 if int(info.get("process_id", -1)) != self.process.pid:
-                                    raise RuntimeError("port is not owned by spawned Redis")
-                        return self
+                                    raise RuntimeError(f"port is not owned by spawned {self.kind}")
+                                is_dragonfly = "dragonfly_version" in info
+                                if is_dragonfly != (self.kind == "dragonfly") or "valkey_version" in info:
+                                    raise RuntimeError(f"INFO server identity does not match {self.kind}")
+                                self.identity = info
                     except (OSError, ConnectionError):
-                        pass
+                        time.sleep(0.02)
+                        continue
+                    # Readiness implies exec completed; verification errors are fatal, not retried.
+                    self.affinity = self.verify_affinity()
+                    return self
                 time.sleep(0.02)
             raise TimeoutError("server startup timed out: " + self.diagnostics())
         except BaseException:
             self.close()
             raise
+
+    def verify_affinity(self):
+        """Linux: the PID must have exec'd the server binary with exactly the requested CPUs."""
+        pid = self.process.pid
+        if platform.system() != "Linux":
+            return {"requested": None, "effective": None, "source": "unavailable off Linux"}
+        exe = os.path.realpath(f"/proc/{pid}/exe")
+        if exe != os.path.realpath(self.binary):
+            raise RuntimeError(f"owned PID executes {exe}, expected {self.binary}")
+        effective = sorted(os.sched_getaffinity(pid))
+        if self.cpus is not None and effective != self.cpus:
+            raise RuntimeError(f"server affinity {effective}, requested {self.cpus}")
+        return {"requested": self.cpus, "effective": effective, "exe": exe,
+                "source": "os.sched_getaffinity(owned PID) after readiness"}
 
     def diagnostics(self):
         if self.log is None:

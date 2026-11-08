@@ -12,7 +12,7 @@ use std::{
     net::{IpAddr, SocketAddr},
     path::PathBuf,
     pin::Pin,
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, MutexGuard},
     time::{Duration, Instant},
 };
 use tokio::{
@@ -66,11 +66,14 @@ pub trait SourceConnection: Send {
 pub(crate) struct CommittedPosition {
     pub history: Bytes,
     pub offset: u64,
-    pub fsynced_offset: u64,
+    /// `None`: no fsync of this image or stream has been proven.
+    pub fsynced_offset: Option<u64>,
 }
 #[derive(Clone, Copy, Debug)]
 pub struct Applied {
-    pub fsynced_offset: u64,
+    /// `None`: nothing applied so far is known durable (AOF off, a closed
+    /// fsync gate, or no fsync yet); never a numeric stand-in for zero.
+    pub fsynced_offset: Option<u64>,
 }
 #[derive(Clone, Copy, Default)]
 pub struct SnapshotRequest {
@@ -101,6 +104,11 @@ pub struct Config {
     pub announce_ip: Option<String>,
     pub io_timeout: Duration,
     pub reconnect_delay: Duration,
+    /// Fresh ephemeral memory servers only: start without stream history and
+    /// activate it on the first downstream SYNC/PSYNC or upstream link (see
+    /// `NativeReplication::activate`). Any data directory keeps it eager, so
+    /// recovered and durable offsets stay continuous.
+    pub lazy_history: bool,
     pub aof_enabled: bool,
     pub allow_loopback: bool,
     pub allow_private: bool,
@@ -162,7 +170,9 @@ pub struct ReplicaStatus {
     pub host: String,
     pub port: u16,
     pub processed: u64,
-    pub fsynced: u64,
+    /// `None` until the replica sends a real FACK: an ordinary ACK proves
+    /// nothing durable, even at offset zero.
+    pub fsynced: Option<u64>,
     pub online: bool,
     pub last_ack: Instant,
 }
@@ -170,10 +180,11 @@ pub struct ReplicaStatus {
 pub struct Status {
     pub role: Role,
     pub history: String,
+    pub history_active: bool,
     pub secondary_history: Option<String>,
     pub secondary_valid_through: u64,
     pub offset: u64,
-    pub fsynced_offset: u64,
+    pub fsynced_offset: Option<u64>,
     pub upstream: Option<(String, u16)>,
     pub upstream_connected: bool,
     pub replicas: Vec<ReplicaStatus>,
@@ -204,7 +215,8 @@ struct State {
     history: String,
     secondary: Option<(String, u64)>,
     offset: u64,
-    fsynced: u64,
+    /// Durable through this offset; `None` when nothing is proven durable.
+    fsynced: Option<u64>,
     backlog: VecDeque<Chunk>,
     backlog_len: usize,
     replicas: BTreeMap<u64, ReplicaStatus>,
@@ -216,11 +228,17 @@ struct State {
     aof: bool,
     force_full_sync: bool,
     history_epoch: u64,
+    /// Whether stream bytes are encoded and retained; see `activate`.
+    active: bool,
 }
 pub struct NativeReplication {
     config: Config,
     backend: Arc<dyn Backend>,
     state: Mutex<State>,
+    /// `state.upstream.is_some()`, stored only by `set_upstream` under `state`.
+    replica: std::sync::atomic::AtomicBool,
+    /// `state.active`, stored only by `set_active` under `state`. Monotonic.
+    active: std::sync::atomic::AtomicBool,
     changed: Notify,
     control: watch::Sender<u64>,
     stopped: watch::Sender<bool>,
@@ -243,12 +261,16 @@ impl NativeReplication {
         std::fs::create_dir_all(&config.staging_directory)?;
         let (control, _) = watch::channel(0);
         let (stopped, _) = watch::channel(false);
+        let active = !config.lazy_history;
         Ok(Arc::new(Self {
             state: Mutex::new(State {
                 history: history_id(),
                 secondary: None,
                 offset: 0,
-                fsynced: 0,
+                // An eager server starts from the image its WAL already holds
+                // when AOF is on (as before). Lazy servers have no data
+                // directory, hence nothing durable.
+                fsynced: (!config.lazy_history).then_some(0),
                 backlog: VecDeque::new(),
                 backlog_len: 0,
                 replicas: BTreeMap::new(),
@@ -260,7 +282,10 @@ impl NativeReplication {
                 aof: config.aof_enabled,
                 force_full_sync: false,
                 history_epoch: 0,
+                active,
             }),
+            replica: std::sync::atomic::AtomicBool::new(false),
+            active: std::sync::atomic::AtomicBool::new(active),
             config,
             backend,
             changed: Notify::new(),
@@ -281,8 +306,67 @@ impl NativeReplication {
         self.state.lock().unwrap().failover = None;
         self.changed.notify_waiters();
     }
+    /// The common primary check avoids taking the history lock. A replica
+    /// answer can skip publication entirely, so confirm it under the lock:
+    /// do not bypass an unfinished role transition that may still poison it.
     pub fn is_replica(&self) -> bool {
-        self.state.lock().unwrap().upstream.is_some()
+        if self.replica.load(std::sync::atomic::Ordering::Acquire) {
+            return self.state.lock().unwrap().upstream.is_some();
+        }
+        // Empty primary records can also finish without another state access.
+        assert!(
+            !self.state.is_poisoned(),
+            "native replication state is poisoned"
+        );
+        false
+    }
+    /// The only `State::upstream` writer. The guard proves `state` is held, so
+    /// `is_replica` and the locked role fields agree at every lock boundary.
+    fn set_upstream(&self, state: &mut MutexGuard<'_, State>, upstream: Option<Upstream>) {
+        let replica = upstream.is_some();
+        if replica {
+            // A replica records, forwards and can be promoted with its stream.
+            self.activate(state);
+        }
+        state.upstream = upstream;
+        self.replica
+            .store(replica, std::sync::atomic::Ordering::Release);
+    }
+    /// Lock-free and monotonic: `true` is final, while `false` may already be
+    /// stale, so a commit decides publication with it only at its commit gate.
+    pub fn history_active(&self) -> bool {
+        self.active.load(std::sync::atomic::Ordering::Acquire)
+    }
+    /// The only `State::active` writer. Callers that do not install their own
+    /// history call `activate` instead.
+    fn set_active(&self, state: &mut MutexGuard<'_, State>) {
+        state.active = true;
+        self.active
+            .store(true, std::sync::atomic::Ordering::Release);
+    }
+    /// Starts lazy history for good, as Redis creates its backlog. While it was
+    /// inactive nothing advanced the offset or filled the backlog, yet writes
+    /// happened: the preactivation identifier names a stream that recorded none
+    /// of them, so it is replaced (with no secondary) before any continuation
+    /// check, epoch sample or upstream PSYNC can use it. Its holders full-sync.
+    ///
+    /// Ordering with commits. A commit reads `history_active` at its commit
+    /// gate while still holding what it mutated under: its shard lease, the
+    /// coordinator's turn or a pool pause. A downstream activates before its
+    /// snapshot, whose `Pool::pause` on the coordinator waits for every such
+    /// holder, and reads the offset under that pause. Hence a commit that read
+    /// "inactive" finished before the pause: its effect is in the image, not
+    /// the stream. One that published did so before the pause, ending at or
+    /// before the snapshot offset. Every commit after the pause happens-after
+    /// activation, so it reads "active" and its bytes follow that offset; a
+    /// batch staged while inactive is encoded at the gate then, never dropped.
+    fn activate(&self, state: &mut MutexGuard<'_, State>) {
+        if state.active {
+            return;
+        }
+        state.history = history_id();
+        state.secondary = None;
+        self.set_active(state);
     }
     pub fn status(&self) -> Status {
         let s = self.state.lock().unwrap();
@@ -293,6 +377,7 @@ impl NativeReplication {
                 Role::Primary
             },
             history: s.history.clone(),
+            history_active: s.active,
             secondary_history: s.secondary.as_ref().map(|v| v.0.clone()),
             secondary_valid_through: s.secondary.as_ref().map_or(0, |v| v.1),
             offset: s.offset,
@@ -318,10 +403,10 @@ impl NativeReplication {
         &self,
         history: String,
         offset: u64,
-        fsynced: u64,
+        fsynced: Option<u64>,
         generation: u64,
     ) -> io::Result<()> {
-        if !valid_history(&history) || fsynced > offset {
+        if !valid_history(&history) || fsynced.is_some_and(|fsynced| fsynced > offset) {
             return Err(invalid("invalid installed replication position"));
         }
         let mut s = self.state.lock().unwrap();
@@ -342,26 +427,31 @@ impl NativeReplication {
         Ok(())
     }
     /// Called once, in WAL commit order, with resolved effects (including DB
-    /// selection, absolute expirations, and resolved random choices).
+    /// selection, absolute expirations, and resolved random choices). The
+    /// commit gate publishes only once `history_active` reads true.
     pub fn publish(&self, bytes: Bytes, fsynced: bool) -> io::Result<u64> {
         let mut s = self.state.lock().unwrap();
         if s.upstream.is_some() {
             return Err(invalid("cannot publish client writes on a replica"));
         }
+        if !s.active {
+            return Err(invalid("cannot publish before native history activation"));
+        }
         let end = append(&mut s, bytes, self.config.backlog_bytes)?;
         if fsynced {
-            s.fsynced = end;
+            s.fsynced = Some(end);
         }
         drop(s);
         self.changed.notify_waiters();
         Ok(end)
     }
+    /// A real fsync made everything through `offset` durable.
     pub fn mark_fsynced(&self, offset: u64) -> io::Result<()> {
         let mut s = self.state.lock().unwrap();
         if offset > s.offset {
             return Err(invalid("fsync offset exceeds processed offset"));
         }
-        s.fsynced = s.fsynced.max(offset);
+        s.fsynced = s.fsynced.max(Some(offset));
         drop(s);
         self.changed.notify_waiters();
         self.ack_requested.notify_one();
@@ -380,7 +470,7 @@ impl NativeReplication {
         let (generation, cancelled_failover) = {
             let mut s = self.state.lock().unwrap();
             let cancelled_failover = s.failover.take().is_some();
-            s.upstream = Some(upstream);
+            self.set_upstream(&mut s, Some(upstream));
             s.connected = false;
             s.generation = s.generation.wrapping_add(1);
             (s.generation, cancelled_failover)
@@ -424,7 +514,7 @@ impl NativeReplication {
             if s.upstream.is_some() {
                 s.secondary = Some((s.history.clone(), s.offset.saturating_add(1)));
                 s.history = history_id();
-                s.upstream = None;
+                self.set_upstream(&mut s, None);
                 s.connected = false;
                 s.generation = s.generation.wrapping_add(1);
             }
@@ -654,13 +744,13 @@ impl NativeReplication {
                     return reply_error("ERR WAITAOF cannot be used when AOF is disabled");
                 }
                 (
-                    u64::from(s.aof && s.fsynced >= watermark),
+                    u64::from(s.aof && s.fsynced.is_some_and(|fsynced| fsynced >= watermark)),
                     s.replicas
                         .values()
                         .filter(|r| {
                             r.online
                                 && if durable {
-                                    r.fsynced >= watermark
+                                    r.fsynced.is_some_and(|fsynced| fsynced >= watermark)
                                 } else {
                                     r.processed >= watermark
                                 }
@@ -713,8 +803,9 @@ impl NativeReplication {
     }
     fn request_ack(&self) -> io::Result<()> {
         let mut s = self.state.lock().unwrap();
-        // Chained replicas must forward the upstream byte history unchanged.
-        if s.upstream.is_some() {
+        // Chained replicas must forward the upstream byte history unchanged,
+        // and an inactive history has no downstream that could answer.
+        if s.upstream.is_some() || !s.active {
             return Ok(());
         }
         append(
@@ -750,7 +841,7 @@ impl NativeReplication {
             let mut s = self.state.lock().unwrap();
             reconcile_paused_position(&mut s, position)?;
             let cancelled = s.failover.take().is_some();
-            s.upstream = Some(upstream);
+            self.set_upstream(&mut s, Some(upstream));
             s.connected = false;
             s.generation = s.generation.wrapping_add(1);
             if cancelled {
@@ -788,7 +879,7 @@ impl NativeReplication {
             if s.upstream.is_some() {
                 s.secondary = Some((s.history.clone(), s.offset.saturating_add(1)));
                 s.history = history_id();
-                s.upstream = None;
+                self.set_upstream(&mut s, None);
                 s.connected = false;
             }
             s.generation = s.generation.wrapping_add(1);
@@ -926,7 +1017,7 @@ impl NativeReplication {
                     return result_ok(Err(error));
                 }
                 if s.upstream.is_some() {
-                    s.upstream = None;
+                    self.set_upstream(&mut s, None);
                     s.connected = false;
                 }
                 s.failover = None;
@@ -1045,8 +1136,10 @@ impl NativeReplication {
                         if s.failover != Some(token) {
                             return;
                         }
-                        s.upstream =
-                            Some(this.configured_upstream(chosen.host.clone(), chosen.port));
+                        this.set_upstream(
+                            &mut s,
+                            Some(this.configured_upstream(chosen.host.clone(), chosen.port)),
+                        );
                         s.connected = false;
                         s.generation
                     };
@@ -1187,17 +1280,17 @@ fn result_ok(result: io::Result<()>) -> CommandResult {
 /// Encodes trusted internal handshake/control commands.
 pub fn encode(args: &[Bytes]) -> Bytes {
     let mut out = BytesMut::new();
-    write_command(&mut out, args).expect("BytesMut writer is infallible");
+    write_command(&mut out, args);
     out.freeze()
 }
 /// Shared bounded native encoder for ephemeral commands ordered with commits.
 pub fn encode_command(args: &[Bytes]) -> io::Result<Bytes> {
     let length = command_length(args)?;
     let mut out = BytesMut::with_capacity(length);
-    write_command(&mut out, args)?;
+    write_command(&mut out, args);
     Ok(out.freeze())
 }
-fn command_length(args: &[Bytes]) -> io::Result<usize> {
+fn command_length<A: AsRef<[u8]>>(args: &[A]) -> io::Result<usize> {
     fn digits(n: usize) -> usize {
         if n == 0 { 1 } else { n.ilog10() as usize + 1 }
     }
@@ -1206,6 +1299,7 @@ fn command_length(args: &[Bytes]) -> io::Result<usize> {
     }
     let mut length = digits(args.len()) + 3;
     for arg in args {
+        let arg = arg.as_ref();
         length = length
             .checked_add(arg.len())
             .and_then(|n| n.checked_add(digits(arg.len()) + 5))
@@ -1214,16 +1308,15 @@ fn command_length(args: &[Bytes]) -> io::Result<usize> {
     }
     Ok(length)
 }
-fn write_command(out: &mut BytesMut, args: &[Bytes]) -> io::Result<()> {
-    use bytes::BufMut;
-    use std::io::Write;
-    write!((&mut *out).writer(), "*{}\r\n", args.len())?;
+/// Emits exactly the bytes `command_length` counts.
+fn write_command<A: AsRef<[u8]>>(out: &mut BytesMut, args: &[A]) {
+    crate::protocol::encode_length(b'*', args.len(), out);
     for arg in args {
-        write!((&mut *out).writer(), "${}\r\n", arg.len())?;
+        let arg = arg.as_ref();
+        crate::protocol::encode_length(b'$', arg.len(), out);
         out.extend_from_slice(arg);
         out.extend_from_slice(b"\r\n");
     }
-    Ok(())
 }
 
 impl NativeReplication {
@@ -1301,7 +1394,10 @@ impl NativeReplication {
             }
         };
         let accepted = {
-            let s = self.state.lock().unwrap();
+            let mut s = self.state.lock().unwrap();
+            // The first accepted synchronization starts lazy history before
+            // any continuation check or epoch sample; see `activate`.
+            self.activate(&mut s);
             requested
                 .as_ref()
                 .filter(|(id, next)| !client.rdb_only && partial(&s, id, *next))
@@ -1382,7 +1478,7 @@ impl NativeReplication {
                     host: client.announce_ip.unwrap_or_else(|| peer_ip.to_string()),
                     port: client.listening_port,
                     processed: 0,
-                    fsynced: 0,
+                    fsynced: None,
                     online: false,
                     last_ack: Instant::now(),
                 },
@@ -1470,9 +1566,8 @@ impl NativeReplication {
         }
         if let Some(r) = s.replicas.get_mut(&replica) {
             r.processed = r.processed.max(processed);
-            if let Some(f) = fsynced {
-                r.fsynced = r.fsynced.max(f);
-            }
+            // An ACK without FACK keeps any durable offset already proven.
+            r.fsynced = r.fsynced.max(fsynced);
             r.online = true;
             r.last_ack = Instant::now();
         }
@@ -1490,11 +1585,15 @@ impl NativeReplication {
                 self.drain().await;
                 return;
             }
+            // Role fields change before the actor acknowledges their mode.
+            // Read the notification first: a newer state then waits for its ACK,
+            // without consuming that ACK after taking an older state snapshot.
+            let acknowledged_generation = *control.borrow_and_update();
             let (upstream, generation, failover) = {
                 let s = self.state.lock().unwrap();
                 (s.upstream.clone(), s.generation, s.failover.is_some())
             };
-            let Some(upstream) = upstream else {
+            let Some(upstream) = upstream.filter(|_| generation == acknowledged_generation) else {
                 tokio::select! {
                     _ = control.changed() => {},
                     _ = shutdown.changed() => { self.drain().await; return; }
@@ -1513,7 +1612,7 @@ impl NativeReplication {
                     if s.generation == generation {
                         s.connected = false;
                         if failover && s.failover.is_some() && result.is_err() {
-                            s.upstream = None;
+                            self.set_upstream(&mut s, None);
                             s.failover = None;
                             true
                         } else {
@@ -1707,7 +1806,10 @@ impl NativeReplication {
                     Ok(applied) => applied,
                     Err(error) => return Err(this.require_full_sync(generation, error).await),
                 };
-                if applied.fsynced_offset > offset {
+                if applied
+                    .fsynced_offset
+                    .is_some_and(|fsynced| fsynced > offset)
+                {
                     return Err(this
                         .require_full_sync(
                             generation,
@@ -1722,6 +1824,7 @@ impl NativeReplication {
                         "stale snapshot publication generation",
                     ));
                 }
+                // `None` < `Some`: the committed position proves at least as much.
                 if s.history != history || s.offset != offset || s.fsynced < applied.fsynced_offset
                 {
                     return Err(invalid(
@@ -1865,7 +1968,10 @@ impl NativeReplication {
             Bytes::from_static(b"ACK"),
             Bytes::from(offset.to_string()),
         ];
-        if aof {
+        // FACK reports proven durability only: with none yet (AOF just
+        // enabled, a closed fsync gate) a numeric zero would claim the
+        // snapshot image itself was durable.
+        if aof && let Some(fsynced) = fsynced {
             args.push(Bytes::from_static(b"FACK"));
             args.push(Bytes::from(fsynced.to_string()));
         }
@@ -2125,86 +2231,83 @@ pub fn encode_batch(batch: &crate::journal::Batch) -> io::Result<Bytes> {
     }) {
         return Ok(Bytes::new());
     }
+    const MULTI: &[u8] = b"*1\r\n$5\r\nMULTI\r\n";
+    const EXEC: &[u8] = b"*1\r\n$4\r\nEXEC\r\n";
+    // MULTI shares the first command's reservation, and every reservation
+    // keeps EXEC headroom, so a single-effect batch is one exact allocation
+    // and the terminal EXEC never grows the buffer.
     let mut out = BytesMut::new();
-    fn emit(out: &mut BytesMut, args: &[Bytes]) -> io::Result<()> {
-        command_length(args)?;
-        write_command(out, args)
+    // Arguments borrow the immutable captured mutations; only numeric text
+    // and the nested replay record are materialized for the emit statement.
+    fn emit(out: &mut BytesMut, args: &[&[u8]]) -> io::Result<()> {
+        let length = command_length(args)?;
+        if out.is_empty() {
+            out.reserve(MULTI.len() + length + EXEC.len());
+            out.extend_from_slice(MULTI);
+        } else {
+            out.reserve(length + EXEC.len());
+        }
+        write_command(out, args);
+        Ok(())
     }
-    fn literal(b: &'static [u8]) -> Bytes {
-        Bytes::from_static(b)
+    fn decimal(n: impl std::fmt::Display) -> String {
+        n.to_string()
     }
-    fn decimal(n: impl std::fmt::Display) -> Bytes {
-        Bytes::from(n.to_string())
-    }
-    emit(&mut out, &[literal(b"MULTI")])?;
     let mut selected_database = 0;
     for mutation in &batch.mutations {
         match mutation {
             M::SelectDatabase { database } => {
                 selected_database = *database;
-                emit(&mut out, &[literal(b"SELECT"), decimal(database)])?;
+                emit(&mut out, &[b"SELECT", decimal(database).as_bytes()])?;
             }
             M::Set {
                 key,
                 value,
                 expires_at,
             } => {
-                emit(&mut out, &[literal(b"SET"), key.clone(), value.clone()])?;
+                emit(&mut out, &[b"SET", key, value])?;
                 if let Some(at) = expires_at {
-                    emit(&mut out, &[literal(b"PEXPIREAT"), key.clone(), decimal(at)])?;
+                    emit(&mut out, &[b"PEXPIREAT", key, decimal(at).as_bytes()])?;
                 }
             }
-            M::Delete { key } => emit(&mut out, &[literal(b"DEL"), key.clone()])?,
+            M::Delete { key } => emit(&mut out, &[b"DEL", key])?,
             M::Push { key, values, right } => {
+                let command: &[u8] = if *right { b"RPUSH" } else { b"LPUSH" };
                 for v in values {
-                    emit(
-                        &mut out,
-                        &[
-                            literal(if *right { b"RPUSH" } else { b"LPUSH" }),
-                            key.clone(),
-                            v.clone(),
-                        ],
-                    )?;
+                    emit(&mut out, &[command, key, v])?;
                 }
             }
-            M::Pop { key, count, right } => emit(
-                &mut out,
-                &[
-                    literal(if *right { b"RPOP" } else { b"LPOP" }),
-                    key.clone(),
-                    decimal(count),
-                ],
-            )?,
+            M::Pop { key, count, right } => {
+                let command: &[u8] = if *right { b"RPOP" } else { b"LPOP" };
+                emit(&mut out, &[command, key, decimal(count).as_bytes()])?
+            }
             M::Expire { key, expires_at } => match expires_at {
-                Some(at) => emit(&mut out, &[literal(b"PEXPIREAT"), key.clone(), decimal(at)])?,
-                None => emit(&mut out, &[literal(b"PERSIST"), key.clone()])?,
+                Some(at) => emit(&mut out, &[b"PEXPIREAT", key, decimal(at).as_bytes()])?,
+                None => emit(&mut out, &[b"PERSIST", key])?,
             },
             M::SetAdd { key, members } => {
                 for m in members {
-                    emit(&mut out, &[literal(b"SADD"), key.clone(), m.clone()])?;
+                    emit(&mut out, &[b"SADD", key, m])?;
                 }
             }
             M::SetRemove { key, members } => {
                 for m in members {
-                    emit(&mut out, &[literal(b"SREM"), key.clone(), m.clone()])?;
+                    emit(&mut out, &[b"SREM", key, m])?;
                 }
             }
             M::HashSet { key, fields } => {
                 for (field, value, deadline) in fields {
-                    emit(
-                        &mut out,
-                        &[literal(b"HSET"), key.clone(), field.clone(), value.clone()],
-                    )?;
+                    emit(&mut out, &[b"HSET", key, field, value])?;
                     if let Some(at) = deadline {
                         emit(
                             &mut out,
                             &[
-                                literal(b"HPEXPIREAT"),
-                                key.clone(),
-                                decimal(at),
-                                literal(b"FIELDS"),
-                                literal(b"1"),
-                                field.clone(),
+                                b"HPEXPIREAT",
+                                key,
+                                decimal(at).as_bytes(),
+                                b"FIELDS",
+                                b"1",
+                                field,
                             ],
                         )?;
                     }
@@ -2212,64 +2315,56 @@ pub fn encode_batch(batch: &crate::journal::Batch) -> io::Result<Bytes> {
             }
             M::HashDelete { key, fields } => {
                 for field in fields {
-                    emit(&mut out, &[literal(b"HDEL"), key.clone(), field.clone()])?;
+                    emit(&mut out, &[b"HDEL", key, field])?;
                 }
             }
             M::SortedSetAdd { key, entries } => {
+                let mut buffer = ryu::Buffer::new();
                 for (member, score) in entries {
                     if score.is_nan() {
                         return Err(invalid("NaN in resolved sorted-set effect"));
                     }
-                    let text = if *score == f64::INFINITY {
-                        Bytes::from_static(b"+inf")
+                    let text: &[u8] = if *score == f64::INFINITY {
+                        b"+inf"
                     } else if *score == f64::NEG_INFINITY {
-                        Bytes::from_static(b"-inf")
+                        b"-inf"
                     } else {
-                        Bytes::from(ryu::Buffer::new().format(*score).to_owned())
+                        buffer.format(*score).as_bytes()
                     };
-                    emit(
-                        &mut out,
-                        &[literal(b"ZADD"), key.clone(), text, member.clone()],
-                    )?;
+                    emit(&mut out, &[b"ZADD", key, text, member])?;
                 }
             }
             M::SortedSetRemove { key, members } => {
                 for member in members {
-                    emit(&mut out, &[literal(b"ZREM"), key.clone(), member.clone()])?;
+                    emit(&mut out, &[b"ZREM", key, member])?;
                 }
             }
-            M::Clear => emit(&mut out, &[literal(b"FLUSHDB")])?,
+            M::Clear => emit(&mut out, &[b"FLUSHDB"])?,
             M::SwapDatabases { first, second } => emit(
                 &mut out,
-                &[literal(b"SWAPDB"), decimal(first), decimal(second)],
+                &[
+                    b"SWAPDB",
+                    decimal(first).as_bytes(),
+                    decimal(second).as_bytes(),
+                ],
             )?,
-            M::Rename { from, to } => {
-                emit(&mut out, &[literal(b"RENAME"), from.clone(), to.clone()])?
+            M::Rename { from, to } => emit(&mut out, &[b"RENAME", from, to])?,
+            M::ListRemove { key, value, count } => {
+                emit(&mut out, &[b"LREM", key, decimal(count).as_bytes(), value])?
             }
-            M::ListRemove { key, value, count } => emit(
-                &mut out,
-                &[literal(b"LREM"), key.clone(), decimal(count), value.clone()],
-            )?,
-            M::ListSet { key, index, value } => emit(
-                &mut out,
-                &[literal(b"LSET"), key.clone(), decimal(index), value.clone()],
-            )?,
+            M::ListSet { key, index, value } => {
+                emit(&mut out, &[b"LSET", key, decimal(index).as_bytes(), value])?
+            }
             M::ListInsert {
                 key,
                 value,
                 pivot,
                 before,
                 ..
-            } => emit(
-                &mut out,
-                &[
-                    literal(b"LINSERT"),
-                    key.clone(),
-                    literal(if *before { b"BEFORE" } else { b"AFTER" }),
-                    pivot.clone(),
-                    value.clone(),
-                ],
-            )?,
+            } => {
+                let position: &[u8] = if *before { b"BEFORE" } else { b"AFTER" };
+                emit(&mut out, &[b"LINSERT", key, position, pivot, value])?
+            }
             // Local recovery and RDB auxiliary records have no logical effect
             // to relay and must never become invented database keys.
             M::NativePosition { .. }
@@ -2286,26 +2381,19 @@ pub fn encode_batch(batch: &crate::journal::Batch) -> io::Result<Bytes> {
                         mutation.clone(),
                     ],
                 };
-                emit(
-                    &mut out,
-                    &[
-                        literal(b"FFKV.REPLAY1"),
-                        crate::wal::encode_native_batch(&resolved)?,
-                    ],
-                )?;
+                let record = crate::wal::encode_native_batch(&resolved)?;
+                emit(&mut out, &[b"FFKV.REPLAY1", &record])?;
             }
-            M::Functions { snapshot } => emit(
-                &mut out,
-                &[
-                    literal(b"FUNCTION"),
-                    literal(b"RESTORE"),
-                    snapshot.clone(),
-                    literal(b"FLUSH"),
-                ],
-            )?,
+            M::Functions { snapshot } => {
+                emit(&mut out, &[b"FUNCTION", b"RESTORE", snapshot, b"FLUSH"])?
+            }
         }
     }
-    emit(&mut out, &[literal(b"EXEC")])?;
+    if out.is_empty() {
+        out.reserve(MULTI.len() + EXEC.len());
+        out.extend_from_slice(MULTI);
+    }
+    out.extend_from_slice(EXEC);
     Ok(out.freeze())
 }
 
@@ -2324,7 +2412,7 @@ mod tests {
             history: "a".repeat(40),
             secondary: None,
             offset: 0,
-            fsynced: 0,
+            fsynced: Some(0),
             backlog: VecDeque::new(),
             backlog_len: 0,
             replicas: BTreeMap::new(),
@@ -2336,7 +2424,121 @@ mod tests {
             aof: true,
             force_full_sync: false,
             history_epoch: 0,
+            active: true,
         }
+    }
+    #[tokio::test]
+    async fn supervisor_waits_for_actor_role_ack_before_opening_the_first_upstream() {
+        use futures_util::FutureExt;
+        struct Directory(PathBuf);
+        impl Drop for Directory {
+            fn drop(&mut self) {
+                let _ = std::fs::remove_dir_all(&self.0);
+            }
+        }
+        let directory = Directory(
+            std::env::temp_dir().join(format!("ffkv-role-ack-{:032x}", rand::random::<u128>())),
+        );
+        let state = Arc::new(crate::state::State::new(0, 1, false));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let config = Config {
+            backlog_bytes: 4096,
+            max_snapshot_bytes: 1024 * 1024,
+            staging_directory: directory.0.clone(),
+            listening_port: 0,
+            announce_ip: None,
+            io_timeout: Duration::from_secs(5),
+            reconnect_delay: Duration::from_millis(10),
+            lazy_history: false,
+            aof_enabled: false,
+            allow_loopback: true,
+            allow_private: true,
+            upstream_template: None,
+        };
+        let backend = crate::native_runtime::Runtime::new(
+            &state,
+            crate::native_runtime::Config {
+                native: config.clone(),
+                cluster: None,
+                fsync_gate: None,
+            },
+        );
+        let native = NativeReplication::new(config, backend).unwrap();
+        // follow() publishes these fields before awaiting the actor's role ACK.
+        // Deliberately hold the later control notification back.
+        {
+            let mut state = native.state.lock().unwrap();
+            native.set_upstream(
+                &mut state,
+                Some(native.configured_upstream(address.ip().to_string(), address.port())),
+            );
+            state.generation = 1;
+        }
+        let mut supervisor = Box::pin(native.clone().supervise());
+        assert!(supervisor.as_mut().now_or_never().is_none());
+        let premature = tokio::time::timeout(Duration::from_millis(100), async {
+            tokio::select! {
+                accepted = listener.accept() => accepted.unwrap().0,
+                _ = supervisor.as_mut() => panic!("supervisor stopped"),
+            }
+        })
+        .await;
+        assert!(
+            premature.is_err(),
+            "upstream connected before the actor acknowledged its replica role"
+        );
+        native.control.send_replace(1);
+        let mut upstream = tokio::time::timeout(Duration::from_secs(2), async {
+            tokio::select! {
+                accepted = listener.accept() => accepted.unwrap().0,
+                _ = supervisor.as_mut() => panic!("supervisor stopped"),
+            }
+        })
+        .await
+        .unwrap();
+        let mut ping = [0; 14];
+        tokio::time::timeout(Duration::from_secs(2), async {
+            tokio::select! {
+                read = upstream.read_exact(&mut ping) => read.unwrap(),
+                _ = supervisor.as_mut() => panic!("supervisor stopped"),
+            }
+        })
+        .await
+        .unwrap();
+        assert_eq!(&ping, b"*1\r\n$4\r\nPING\r\n");
+        upstream.write_all(b"+PONG\r\n").await.unwrap();
+        let expected = b"*3\r\n$8\r\nREPLCONF\r\n$14\r\nlistening-port\r\n$1\r\n0\r\n";
+        let mut announcement = vec![0; expected.len()];
+        tokio::time::timeout(Duration::from_secs(2), async {
+            tokio::select! {
+                read = upstream.read_exact(&mut announcement) => read.unwrap(),
+                _ = supervisor.as_mut() => panic!("supervisor stopped"),
+            }
+        })
+        .await
+        .unwrap();
+        assert_eq!(announcement, expected);
+        // A genuinely newer generation must still cancel the established link.
+        {
+            let mut state = native.state.lock().unwrap();
+            native.set_upstream(&mut state, None);
+            state.generation = 2;
+        }
+        native.control.send_replace(2);
+        let mut byte = [0];
+        let closed = tokio::time::timeout(Duration::from_secs(2), async {
+            tokio::select! {
+                read = upstream.read(&mut byte) => read.unwrap(),
+                _ = supervisor.as_mut() => panic!("supervisor stopped"),
+            }
+        })
+        .await
+        .unwrap();
+        assert_eq!(
+            closed, 0,
+            "role replacement left the previous upstream open"
+        );
     }
     async fn assert_history_replacement_fences(full_install: bool) {
         let state = Arc::new(crate::state::State::new(0, 1, false));
@@ -2350,6 +2552,7 @@ mod tests {
             announce_ip: None,
             io_timeout: Duration::from_secs(2),
             reconnect_delay: Duration::from_millis(10),
+            lazy_history: false,
             aof_enabled: false,
             allow_loopback: true,
             allow_private: true,
@@ -2375,7 +2578,7 @@ mod tests {
                 host: "127.0.0.1".into(),
                 port: 0,
                 processed: 0,
-                fsynced: 0,
+                fsynced: None,
                 online: false,
                 last_ack: Instant::now(),
             },
@@ -2411,7 +2614,7 @@ mod tests {
         .unwrap();
         if full_install {
             native
-                .commit_snapshot_position("a".repeat(40), 3, 0, native.generation())
+                .commit_snapshot_position("a".repeat(40), 3, None, native.generation())
                 .unwrap();
             native.promote_paused(None, None).unwrap();
         } else {
@@ -2421,7 +2624,7 @@ mod tests {
                     Some(CommittedPosition {
                         history: Bytes::from("b".repeat(40)),
                         offset: 3,
-                        fsynced_offset: 0,
+                        fsynced_offset: None,
                     }),
                 )
                 .unwrap();
@@ -2456,6 +2659,558 @@ mod tests {
     #[tokio::test]
     async fn native_history_full_install_at_identical_position_closes_old_downstream() {
         assert_history_replacement_fences(true).await;
+    }
+    struct RoleFixture {
+        native: Arc<NativeReplication>,
+        // The runtime backend holds the server state only weakly.
+        _state: Arc<crate::state::State>,
+        directory: PathBuf,
+    }
+    impl Drop for RoleFixture {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.directory);
+        }
+    }
+    /// No actor is attached, so every actor role acknowledgement fails.
+    fn role_fixture(lazy_history: bool) -> RoleFixture {
+        let state = Arc::new(crate::state::State::new(0, 1, false));
+        let directory =
+            std::env::temp_dir().join(format!("ffkv-role-{:032x}", rand::random::<u128>()));
+        let config = Config {
+            backlog_bytes: 4096,
+            max_snapshot_bytes: 1024 * 1024,
+            staging_directory: directory.clone(),
+            listening_port: 0,
+            announce_ip: None,
+            io_timeout: Duration::from_secs(2),
+            reconnect_delay: Duration::from_millis(10),
+            lazy_history,
+            aof_enabled: false,
+            allow_loopback: true,
+            allow_private: true,
+            upstream_template: None,
+        };
+        let backend = crate::native_runtime::Runtime::new(
+            &state,
+            crate::native_runtime::Config {
+                native: config.clone(),
+                cluster: None,
+                fsync_gate: None,
+            },
+        );
+        RoleFixture {
+            native: NativeReplication::new(config, backend).unwrap(),
+            _state: state,
+            directory,
+        }
+    }
+    /// `is_replica` decides publication; `status()` reports the locked role.
+    fn observed_role(native: &NativeReplication) -> Role {
+        let role = native.status().role;
+        assert_eq!(
+            native.is_replica(),
+            role == Role::Replica,
+            "role observers disagree"
+        );
+        role
+    }
+    #[tokio::test]
+    async fn role_observers_agree_after_completed_rejected_and_unacknowledged_transitions() {
+        let fixture = role_fixture(false);
+        let native = &fixture.native;
+        let upstream = || native.configured_upstream("127.0.0.1".into(), 1);
+        assert_eq!(observed_role(native), Role::Primary);
+        native.follow_paused(upstream(), None).unwrap();
+        assert_eq!(observed_role(native), Role::Replica);
+        // Rejected before its first effect: the replica role stays.
+        assert!(native.promote_paused(Some(1), None).is_err());
+        assert_eq!(observed_role(native), Role::Replica);
+        native.promote_paused(None, None).unwrap();
+        assert_eq!(observed_role(native), Role::Primary);
+        // A completed failover handoff follows its target with the failover
+        // still pending until the link handshake; ABORT restores the primary.
+        native.follow_paused(upstream(), None).unwrap();
+        let token = native.generation();
+        native.state.lock().unwrap().failover = Some(token);
+        let abort = native
+            .configure_paused(
+                &[
+                    Bytes::from_static(b"FAILOVER"),
+                    Bytes::from_static(b"ABORT"),
+                ],
+                false,
+                None,
+            )
+            .await;
+        assert!(matches!(abort, Some(Resp::Simple("OK"))));
+        assert_eq!(observed_role(native), Role::Primary);
+        // An unacknowledged actor role keeps the role fields it already
+        // changed and stops the supervisor instead of reverting them.
+        assert!(native.follow(upstream()).await.is_err());
+        assert_eq!(observed_role(native), Role::Replica);
+        assert!(native.promote().await.is_err());
+        assert_eq!(observed_role(native), Role::Primary);
+    }
+    #[tokio::test]
+    async fn poisoned_native_state_fails_role_queries_closed() {
+        for replica in [false, true] {
+            let fixture = role_fixture(false);
+            let native = &fixture.native;
+            if replica {
+                native
+                    .follow_paused(native.configured_upstream("127.0.0.1".into(), 1), None)
+                    .unwrap();
+            }
+            assert_eq!(native.is_replica(), replica);
+            let torn = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let _state = native.state.lock().unwrap();
+                panic!("native role state unwound");
+            }));
+            assert!(torn.is_err());
+            // Persistence skips publication on a replica answer (or an empty
+            // record) without touching this state again.
+            let answered =
+                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| native.is_replica()));
+            assert!(
+                answered.is_err(),
+                "poisoned native state answered a role query (replica: {replica})"
+            );
+        }
+    }
+    /// Unactivated lazy history gives a memory commit nothing to publish, yet
+    /// a poisoned history state must not let it settle unpublished: it unwinds
+    /// with no effect and persistence fails closed for every later commit.
+    #[tokio::test]
+    async fn poisoned_unactivated_history_fails_memory_commits_closed() {
+        use crate::{engine::Engine, persistence::Persistence, session::ClientSession};
+        use std::sync::atomic::Ordering;
+        fn set(engine: &mut Engine, value: &'static [u8]) {
+            engine
+                .execute(&mut crate::engine::BoundCommand::bind(&[
+                    Bytes::from_static(b"SET"),
+                    Bytes::from_static(b"key"),
+                    Bytes::from_static(value),
+                ]))
+                .unwrap();
+        }
+        let fixture = role_fixture(true);
+        let native = &fixture.native;
+        let persistence = Persistence::new(None);
+        persistence.set_native(native.clone());
+        let session = Arc::new(ClientSession::new(1));
+        let mut engine = Engine::new();
+        engine.set_recording(true);
+        engine.set_command_session(Some(session.clone()));
+        let torn = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _state = native.state.lock().unwrap();
+            panic!("native history state unwound");
+        }));
+        assert!(torn.is_err());
+        assert!(!native.history_active());
+        set(&mut engine, b"inline");
+        let staged = persistence.stage(&mut engine);
+        let inline = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            persistence.try_commit_now(staged)
+        }));
+        assert!(
+            inline.is_err(),
+            "poisoned history state settled a memory commit"
+        );
+        assert!(persistence.ensure_healthy().is_err());
+        set(&mut engine, b"async");
+        assert!(
+            persistence
+                .commit_staged(persistence.stage(&mut engine))
+                .await
+                .is_err()
+        );
+        assert_eq!(persistence.status().await.revision, 0);
+        assert_eq!(persistence.native_offset(), 0);
+        assert_eq!(session.last_write_offset.load(Ordering::Acquire), 0);
+    }
+    #[tokio::test]
+    async fn lazy_history_retains_nothing_until_an_upstream_link_activates_a_new_identifier() {
+        let fixture = role_fixture(true);
+        let native = &fixture.native;
+        let preactivation = native.status().history;
+        assert!(!native.history_active());
+        // Neither a misrouted publication nor a WAIT's GETACK advances the
+        // stream that the preactivation identifier names.
+        assert!(
+            native
+                .publish(encode(&[Bytes::from_static(b"PING")]), false)
+                .is_err()
+        );
+        native.request_ack().unwrap();
+        assert_eq!(native.status().offset, 0);
+        assert!(native.state.lock().unwrap().backlog.is_empty());
+        // Promoting a primary is no synchronization.
+        native.promote_paused(None, None).unwrap();
+        assert!(!native.history_active());
+        native
+            .follow_paused(native.configured_upstream("127.0.0.1".into(), 1), None)
+            .unwrap();
+        assert!(native.history_active());
+        let following = native.status();
+        assert_ne!(following.history, preactivation);
+        assert_eq!(following.secondary_history, None);
+        assert_eq!(following.offset, 0);
+        // Promotion continues the activated stream; it never deactivates.
+        native.promote_paused(None, None).unwrap();
+        assert!(native.history_active());
+        let promoted = native.status();
+        assert_eq!(promoted.secondary_history, Some(following.history));
+        assert_ne!(promoted.history, preactivation);
+        native.request_ack().unwrap();
+        assert!(native.status().offset > 0);
+    }
+    #[test]
+    fn lazy_history_keeps_a_recovered_identifier_when_a_downstream_arrives() {
+        let fixture = role_fixture(true);
+        let native = &fixture.native;
+        native.restore_position("a".repeat(40), 80, 40).unwrap();
+        assert!(native.history_active());
+        native.activate(&mut native.state.lock().unwrap());
+        let status = native.status();
+        assert_eq!(status.history, "a".repeat(40));
+        assert_eq!(status.offset, 80);
+        assert_eq!(status.fsynced_offset, Some(40));
+    }
+    #[tokio::test]
+    async fn a_registered_replica_meets_a_zero_watermark_only_after_it_acknowledges() {
+        let fixture = role_fixture(true);
+        let native = &fixture.native;
+        let epoch = {
+            let mut s = native.state.lock().unwrap();
+            native.activate(&mut s);
+            // As `serve_downstream` registers a replica after its snapshot.
+            s.replicas.insert(
+                1,
+                ReplicaStatus {
+                    id: 1,
+                    host: "127.0.0.1".into(),
+                    port: 0,
+                    processed: 0,
+                    fsynced: None,
+                    online: false,
+                    last_ack: Instant::now(),
+                },
+            );
+            s.history_epoch
+        };
+        // Writes made before activation leave their sessions at watermark
+        // zero, which a replica still loading its snapshot must not meet.
+        let reply = native.wait(0, 0, 1, 20, false, false, None).await;
+        assert!(matches!(reply, CommandResult::Reply(Resp::Integer(0))));
+        native
+            .downstream_ack(
+                1,
+                &[
+                    Bytes::from_static(b"REPLCONF"),
+                    Bytes::from_static(b"ACK"),
+                    Bytes::from_static(b"0"),
+                ],
+                epoch,
+            )
+            .unwrap();
+        let reply = native.wait(0, 0, 1, 0, false, true, None).await;
+        assert!(matches!(reply, CommandResult::Reply(Resp::Integer(1))));
+    }
+    fn waitaof_counts(reply: CommandResult) -> (i64, i64) {
+        let CommandResult::Reply(Resp::Array(Some(counts))) = reply else {
+            panic!("WAITAOF did not reply with counts");
+        };
+        match counts.as_slice() {
+            [Resp::Integer(local), Resp::Integer(replicas)] => (*local, *replicas),
+            _ => panic!("WAITAOF counts are not two integers"),
+        }
+    }
+    #[tokio::test]
+    async fn only_a_real_fack_meets_a_zero_durable_watermark_and_later_acks_keep_it() {
+        fn ack(native: &NativeReplication, epoch: u64, args: &[&'static [u8]]) {
+            let args: Vec<_> = args.iter().map(|arg| Bytes::from_static(arg)).collect();
+            native.downstream_ack(1, &args, epoch).unwrap();
+        }
+        let fixture = role_fixture(true);
+        let native = &fixture.native;
+        let epoch = {
+            let mut s = native.state.lock().unwrap();
+            native.activate(&mut s);
+            s.replicas.insert(
+                1,
+                ReplicaStatus {
+                    id: 1,
+                    host: "127.0.0.1".into(),
+                    port: 0,
+                    processed: 0,
+                    fsynced: None,
+                    online: false,
+                    last_ack: Instant::now(),
+                },
+            );
+            s.history_epoch
+        };
+        // A memory-only replica loaded the snapshot (online, processed zero)
+        // but never reported an fsync: nothing is durable on it.
+        ack(native, epoch, &[b"REPLCONF", b"ACK", b"0"]);
+        let durable = native.wait(0, 0, 1, 0, true, true, None).await;
+        assert_eq!(waitaof_counts(durable), (0, 0));
+        let processed = native.wait(0, 0, 1, 0, false, true, None).await;
+        assert!(matches!(processed, CommandResult::Reply(Resp::Integer(1))));
+        // A real FACK of zero covers the offset-zero snapshot image.
+        ack(native, epoch, &[b"REPLCONF", b"ACK", b"0", b"FACK", b"0"]);
+        let durable = native.wait(0, 0, 1, 0, true, true, None).await;
+        assert_eq!(waitaof_counts(durable), (0, 1));
+        // A later ordinary ACK keeps the durable offset already proven, and
+        // that offset still bounds what is counted durable.
+        native.request_ack().unwrap();
+        let offset = native.status().offset;
+        native
+            .downstream_ack(
+                1,
+                &[
+                    Bytes::from_static(b"REPLCONF"),
+                    Bytes::from_static(b"ACK"),
+                    Bytes::from(offset.to_string()),
+                ],
+                epoch,
+            )
+            .unwrap();
+        assert_eq!(native.status().replicas[0].fsynced, Some(0));
+        let durable = native.wait(0, 0, 1, 0, true, true, None).await;
+        assert_eq!(waitaof_counts(durable), (0, 1));
+        let durable = native.wait(offset, 0, 1, 0, true, true, None).await;
+        assert_eq!(waitaof_counts(durable), (0, 0));
+    }
+    #[tokio::test]
+    async fn a_replica_reports_fack_only_after_its_snapshot_is_proven_durable() {
+        async fn sent(native: &NativeReplication) -> Bytes {
+            let mut out = Vec::new();
+            native.send_ack(&mut out).await.unwrap();
+            Bytes::from(out)
+        }
+        let fixture = role_fixture(true);
+        let native = &fixture.native;
+        native
+            .follow_paused(native.configured_upstream("127.0.0.1".into(), 1), None)
+            .unwrap();
+        native.set_aof_enabled(true);
+        let generation = native.generation();
+        // A data-bearing snapshot at offset zero installed without a durable
+        // checkpoint (AOF off at install, or a closed fsync gate).
+        native
+            .commit_snapshot_position("a".repeat(40), 0, None, generation)
+            .unwrap();
+        assert_eq!(
+            sent(native).await,
+            encode(&[
+                Bytes::from_static(b"REPLCONF"),
+                Bytes::from_static(b"ACK"),
+                Bytes::from_static(b"0"),
+            ])
+        );
+        native
+            .commit_snapshot_position("a".repeat(40), 0, Some(0), generation)
+            .unwrap();
+        assert_eq!(
+            sent(native).await,
+            encode(&[
+                Bytes::from_static(b"REPLCONF"),
+                Bytes::from_static(b"ACK"),
+                Bytes::from_static(b"0"),
+                Bytes::from_static(b"FACK"),
+                Bytes::from_static(b"0"),
+            ])
+        );
+    }
+    /// Once through the memory read share and once through the write share an
+    /// online backup forces: a commit while inactive settles unpublished, and a
+    /// batch staged then (with no record) is encoded by the gate it commits
+    /// through after the first downstream activated history.
+    #[tokio::test]
+    async fn a_batch_staged_before_activation_is_published_when_it_commits_after() {
+        use crate::{engine::Engine, persistence::Persistence, session::ClientSession};
+        use std::sync::atomic::Ordering;
+        fn set(engine: &mut Engine, key: &'static [u8]) {
+            engine
+                .execute(&mut crate::engine::BoundCommand::bind(&[
+                    Bytes::from_static(b"SET"),
+                    Bytes::from_static(key),
+                    Bytes::from_static(b"value"),
+                ]))
+                .unwrap();
+        }
+        for write_share in [false, true] {
+            let fixture = role_fixture(true);
+            let native = &fixture.native;
+            let persistence = Persistence::new(None);
+            persistence.set_native(native.clone());
+            let backup =
+                crate::server_runtime::OnlineBackup::new(fixture.directory.join("backups"), 0);
+            persistence.set_backup(backup.clone());
+            if write_share {
+                backup.begin().unwrap();
+            }
+            assert_eq!(persistence.commits_in_memory(), !write_share);
+            let session = Arc::new(ClientSession::new(1));
+            let mut engine = Engine::new();
+            engine.set_recording(true);
+            engine.set_command_session(Some(session.clone()));
+            set(&mut engine, b"before");
+            persistence
+                .commit_staged(persistence.stage(&mut engine))
+                .await
+                .unwrap();
+            assert_eq!(persistence.status().await.revision, 1);
+            assert_eq!(native.status().offset, 0);
+            assert_eq!(persistence.native_offset(), 0);
+            assert_eq!(session.last_write_offset.load(Ordering::Acquire), 0);
+            let publish = [
+                Bytes::from_static(b"PUBLISH"),
+                Bytes::from_static(b"events"),
+                Bytes::from_static(b"payload"),
+            ];
+            assert_eq!(persistence.publish_ephemeral(&publish).await.unwrap(), None);
+            assert_eq!(native.status().offset, 0);
+            set(&mut engine, b"staged");
+            let staged = persistence.stage(&mut engine);
+            native.activate(&mut native.state.lock().unwrap());
+            persistence.commit_staged(staged).await.unwrap();
+            let (through, chunks) = native.changes_after(0, 1 << 20).unwrap();
+            assert!(through > 0);
+            assert_eq!(native.status().offset, through);
+            assert_eq!(persistence.native_offset(), through);
+            assert_eq!(session.last_write_offset.load(Ordering::Acquire), through);
+            assert_eq!(persistence.status().await.revision, 2);
+            let commands = decode_commands(Bytes::from(chunks.concat())).unwrap();
+            assert!(commands.iter().any(|command| {
+                command.len() == 3
+                    && command[0].as_ref() == b"SET"
+                    && command[1].as_ref() == b"staged"
+            }));
+            assert!(
+                !commands
+                    .iter()
+                    .flatten()
+                    .any(|argument| argument.as_ref() == b"before"),
+                "a write settled before activation belongs to the snapshot only"
+            );
+            if write_share {
+                backup.abort().await.unwrap();
+            }
+        }
+    }
+    /// Memory commits, inline and async, racing the first activation: each
+    /// either settled while history was inactive, at the unactivated position
+    /// zero and absent from the stream, or streamed exactly its own write and
+    /// reports a distinct end in stream order. A session never returns to the
+    /// unpublished position, and revisions count every commit once.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn memory_commits_racing_first_activation_settle_or_stream_exactly_once() {
+        use crate::{engine::Engine, persistence::Persistence, session::ClientSession};
+        use std::sync::atomic::{AtomicBool, Ordering};
+        const SESSIONS: u64 = 4;
+        // Every record fits the fixture's backlog even if all but session
+        // zero's first half publish.
+        const COMMITS: usize = 8;
+        let fixture = role_fixture(true);
+        let native = fixture.native.clone();
+        let persistence = Arc::new(Persistence::new(None));
+        persistence.set_native(native.clone());
+        let halfway = Arc::new(AtomicBool::new(false));
+        let activation = tokio::spawn({
+            let (native, halfway) = (native.clone(), halfway.clone());
+            async move {
+                while !halfway.load(Ordering::Acquire) {
+                    tokio::task::yield_now().await;
+                }
+                native.activate(&mut native.state.lock().unwrap());
+            }
+        });
+        let committers: Vec<_> = (0..SESSIONS)
+            .map(|id| {
+                let (native, persistence, halfway) =
+                    (native.clone(), persistence.clone(), halfway.clone());
+                tokio::spawn(async move {
+                    let session = Arc::new(ClientSession::new(id));
+                    let mut engine = Engine::new();
+                    engine.set_recording(true);
+                    engine.set_command_session(Some(session.clone()));
+                    let mut settled = Vec::with_capacity(COMMITS);
+                    for sequence in 0..COMMITS {
+                        // Session zero commits on both sides of activation.
+                        if id == 0 && sequence == COMMITS / 2 {
+                            halfway.store(true, Ordering::Release);
+                            while !native.history_active() {
+                                tokio::task::yield_now().await;
+                            }
+                        }
+                        let value = Bytes::from(format!("{id}:{sequence}"));
+                        engine
+                            .execute(&mut crate::engine::BoundCommand::bind(&[
+                                Bytes::from_static(b"SET"),
+                                Bytes::from_static(b"key"),
+                                value.clone(),
+                            ]))
+                            .unwrap();
+                        let staged = persistence.stage(&mut engine);
+                        if sequence % 2 == 0 {
+                            match persistence.try_commit_now(staged) {
+                                Ok(committed) => committed.unwrap(),
+                                Err(_) => panic!("an eligible memory commit was refused"),
+                            }
+                        } else {
+                            persistence.commit_staged(staged).await.unwrap();
+                        }
+                        settled.push((session.last_write_offset.load(Ordering::Acquire), value));
+                        tokio::task::yield_now().await;
+                    }
+                    settled
+                })
+            })
+            .collect();
+        let mut published = std::collections::BTreeMap::new();
+        let mut unpublished = 0;
+        for committer in committers {
+            let settled = committer.await.unwrap();
+            assert!(
+                settled
+                    .windows(2)
+                    .all(|pair| pair[0].0 < pair[1].0 || (pair[0].0 == 0 && pair[1].0 == 0)),
+                "a session's position regressed"
+            );
+            for (offset, value) in settled {
+                if offset == 0 {
+                    unpublished += 1;
+                } else {
+                    assert!(
+                        published.insert(offset, value).is_none(),
+                        "two commits reported one stream end"
+                    );
+                }
+            }
+        }
+        activation.await.unwrap();
+        assert!(unpublished >= COMMITS / 2 && published.len() >= COMMITS / 2);
+        assert_eq!(
+            persistence.status().await.revision,
+            SESSIONS * COMMITS as u64
+        );
+        let (through, chunks) = native.changes_after(0, 1 << 20).unwrap();
+        assert_eq!(native.status().offset, through);
+        assert_eq!(persistence.native_offset(), through);
+        assert_eq!(published.keys().next_back(), Some(&through));
+        let streamed: Vec<Bytes> = decode_commands(Bytes::from(chunks.concat()))
+            .unwrap()
+            .into_iter()
+            .filter(|command| command[0].as_ref() == b"SET")
+            .map(|command| command[2].clone())
+            .collect();
+        assert_eq!(
+            streamed,
+            published.into_values().collect::<Vec<_>>(),
+            "the stream holds exactly the published writes, in reported order"
+        );
     }
     #[test]
     fn backlog_is_byte_addressed_and_exactly_bounded() {
@@ -2554,6 +3309,107 @@ mod tests {
             ]
         );
     }
+    #[test]
+    fn batch_wire_is_binary_safe_across_databases_and_boundaries() {
+        use crate::journal::{Batch, Mutation};
+        let batch = Batch {
+            timestamp_ms: 0,
+            mutations: vec![
+                Mutation::SelectDatabase { database: 3 },
+                Mutation::Set {
+                    key: Bytes::new(),
+                    value: Bytes::from_static(b"a\r\n$3\r\n\0bc"),
+                    expires_at: Some(1_700_000_000_000),
+                },
+                Mutation::SelectDatabase { database: 12 },
+                Mutation::Delete {
+                    key: Bytes::from_static(b"k"),
+                },
+            ],
+        };
+        assert_eq!(
+            &encode_batch(&batch).unwrap()[..],
+            &b"*1\r\n$5\r\nMULTI\r\n\
+               *2\r\n$6\r\nSELECT\r\n$1\r\n3\r\n\
+               *3\r\n$3\r\nSET\r\n$0\r\n\r\n$10\r\na\r\n$3\r\n\0bc\r\n\
+               *3\r\n$9\r\nPEXPIREAT\r\n$0\r\n\r\n$13\r\n1700000000000\r\n\
+               *2\r\n$6\r\nSELECT\r\n$2\r\n12\r\n\
+               *2\r\n$3\r\nDEL\r\n$1\r\nk\r\n\
+               *1\r\n$4\r\nEXEC\r\n"[..]
+        );
+        let no_commands = Batch {
+            timestamp_ms: 0,
+            mutations: vec![Mutation::Push {
+                key: Bytes::from_static(b"k"),
+                values: Vec::new(),
+                right: true,
+            }],
+        };
+        assert_eq!(
+            &encode_batch(&no_commands).unwrap()[..],
+            &b"*1\r\n$5\r\nMULTI\r\n*1\r\n$4\r\nEXEC\r\n"[..]
+        );
+        let nan = Batch {
+            timestamp_ms: 0,
+            mutations: vec![Mutation::SortedSetAdd {
+                key: Bytes::from_static(b"z"),
+                entries: vec![(Bytes::from_static(b"m"), f64::NAN)],
+            }],
+        };
+        assert!(encode_batch(&nan).is_err());
+    }
+    #[test]
+    fn batch_wire_preserves_borrowed_argument_order_and_numeric_spelling() {
+        use crate::journal::{Batch, Mutation};
+        let batch = Batch {
+            timestamp_ms: 0,
+            mutations: vec![
+                Mutation::Push {
+                    key: Bytes::from_static(b"l"),
+                    values: vec![Bytes::from_static(b"a"), Bytes::from_static(b"\0")],
+                    right: false,
+                },
+                Mutation::ListInsert {
+                    key: Bytes::from_static(b"l"),
+                    index: 0,
+                    value: Bytes::from_static(b"v"),
+                    pivot: Bytes::from_static(b"p"),
+                    before: false,
+                },
+                Mutation::ListRemove {
+                    key: Bytes::from_static(b"l"),
+                    value: Bytes::from_static(b"v"),
+                    count: -2,
+                },
+                Mutation::HashSet {
+                    key: Bytes::from_static(b"h"),
+                    fields: vec![(Bytes::from_static(b"f"), Bytes::from_static(b"x"), Some(5))],
+                },
+                Mutation::SortedSetAdd {
+                    key: Bytes::from_static(b"z"),
+                    entries: vec![
+                        (Bytes::from_static(b"a"), 1.5),
+                        (Bytes::from_static(b"b"), f64::NEG_INFINITY),
+                        (Bytes::from_static(b"c"), 2.0),
+                    ],
+                },
+            ],
+        };
+        assert_eq!(
+            &encode_batch(&batch).unwrap()[..],
+            &b"*1\r\n$5\r\nMULTI\r\n\
+               *3\r\n$5\r\nLPUSH\r\n$1\r\nl\r\n$1\r\na\r\n\
+               *3\r\n$5\r\nLPUSH\r\n$1\r\nl\r\n$1\r\n\0\r\n\
+               *5\r\n$7\r\nLINSERT\r\n$1\r\nl\r\n$5\r\nAFTER\r\n$1\r\np\r\n$1\r\nv\r\n\
+               *4\r\n$4\r\nLREM\r\n$1\r\nl\r\n$2\r\n-2\r\n$1\r\nv\r\n\
+               *4\r\n$4\r\nHSET\r\n$1\r\nh\r\n$1\r\nf\r\n$1\r\nx\r\n\
+               *6\r\n$10\r\nHPEXPIREAT\r\n$1\r\nh\r\n$1\r\n5\r\n$6\r\nFIELDS\r\n$1\r\n1\r\n$1\r\nf\r\n\
+               *4\r\n$4\r\nZADD\r\n$1\r\nz\r\n$3\r\n1.5\r\n$1\r\na\r\n\
+               *4\r\n$4\r\nZADD\r\n$1\r\nz\r\n$4\r\n-inf\r\n$1\r\nb\r\n\
+               *4\r\n$4\r\nZADD\r\n$1\r\nz\r\n$3\r\n2.0\r\n$1\r\nc\r\n\
+               *1\r\n$4\r\nEXEC\r\n"[..]
+        );
+    }
 }
 
 impl NativeReplication {
@@ -2622,7 +3478,7 @@ impl NativeReplication {
                         Ok(applied) => applied,
                         Err(error) => return Err(this.require_full_sync(generation, error).await),
                     };
-                    if applied.fsynced_offset > end {
+                    if applied.fsynced_offset.is_some_and(|fsynced| fsynced > end) {
                         return Err(this
                             .require_full_sync(
                                 generation,
@@ -2658,7 +3514,8 @@ impl NativeReplication {
         .map_err(|_| invalid("replication apply task failed"))?
     }
     /// Startup only: restore the durable stream position before starting the
-    /// supervisor, publishing changes, or admitting clients.
+    /// supervisor, publishing changes, or admitting clients. A recovered
+    /// history is active and keeps its identifier.
     pub fn restore_position(
         &self,
         history: String,
@@ -2676,7 +3533,8 @@ impl NativeReplication {
         }
         s.history = history;
         s.offset = offset;
-        s.fsynced = fsynced_offset;
+        s.fsynced = Some(fsynced_offset);
+        self.set_active(&mut s);
         Ok(())
     }
     #[cfg(test)]
@@ -2855,12 +3713,12 @@ fn reconcile_paused_position(
         invalidate_history(state)?;
         state.history = history.to_owned();
         state.offset = position.offset;
-        state.fsynced = position.fsynced_offset.min(position.offset);
+        state.fsynced = position.fsynced_offset.map(|f| f.min(position.offset));
         state.secondary = None;
     } else {
         state.fsynced = state
             .fsynced
-            .max(position.fsynced_offset.min(position.offset));
+            .max(position.fsynced_offset.map(|f| f.min(position.offset)));
     }
     Ok(())
 }

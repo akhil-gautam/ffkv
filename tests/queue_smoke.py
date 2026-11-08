@@ -405,9 +405,11 @@ def differential(address, reference, prefix):
         cleanup_keys(reference, keys)
 
 
-def startup_address(process):
+def startup_address(process, *, on_management=None):
+    """Return RESP readiness, optionally requiring the actual management endpoint."""
     deadline = time.monotonic() + IO_TIMEOUT
     captured = b""
+    resp_address = management_address = None
     while True:
         remaining = deadline - time.monotonic()
         assert remaining > 0, ("ffkv startup timed out", captured)
@@ -418,10 +420,20 @@ def startup_address(process):
         captured += chunk
         assert len(captured) <= 65536, ("unexpected startup output", captured)
         for line in captured.split(b"\n")[:-1]:
-            if b"listening on " in line:
-                address = line.split(b"listening on ", 1)[1].split()[0].decode()
-                host, port = address.rsplit(":", 1)
-                return host, int(port)
+            if line.startswith(b"ffkv management listening on "):
+                management_address = parse_address(
+                    line.split(b"listening on ", 1)[1].split()[0].decode()
+                )
+            elif line.startswith(b"ffkv ") and b" listening on " in line:
+                resp_address = parse_address(
+                    line.split(b"listening on ", 1)[1].split()[0].decode()
+                )
+        if resp_address is not None and (
+            on_management is None or management_address is not None
+        ):
+            if on_management is not None:
+                on_management(management_address)
+            return resp_address
 
 
 def parse_address(value):

@@ -130,7 +130,7 @@ impl Engine {
                 out.write_all(&[kind])?;
                 rdb::write_string(out, key)?;
                 match &entry.value {
-                    Value::String(value) => rdb::write_string(out, value)?,
+                    Value::String(value) => rdb::write_string(out, value.bytes())?,
                     Value::List(values) => {
                         rdb::write_length(out, count as u64)?;
                         for value in values {

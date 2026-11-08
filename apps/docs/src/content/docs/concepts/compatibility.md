@@ -38,6 +38,7 @@ Strings/bitmaps are capped at 8 MiB per value. Extended families have additional
 - [Search](/guides/search/) is an indexing capability over source documents, not a twentieth datatype. Search workers use a real Rayon pool; generation-fenced Rust compaction is not a POSIX-fork GC implementation.
 - [Hybrid storage](/operations/hybrid-storage/) offloads large list/native-job bodies only. MEMORY reports owned allocation estimates, not Redis/jemalloc accounting. There is no eviction or hard dataset/RSS cap.
 - Native replication is asynchronous; ffkv clustering uses its own authenticated bus, not the Redis cluster bus. No production HA certification or exhaustive failover guarantee is implied by command coverage.
+- ffkv requires an explicit native fsync acknowledgement for WAITAOF, including at offset zero. An owned Redis 8.2.1 reference run returned `[0, 1]` for preactivation writes followed by an AOF-disabled replica; ffkv deliberately returns `[0, 0]` in that case rather than interpreting an unknown fsync position as durable zero. This conservative difference follows the [documented fsync guarantee](https://redis.io/docs/latest/commands/waitaof/); it is not a claim of exact Redis edge-case parity.
 
 ## Client/application compatibility
 

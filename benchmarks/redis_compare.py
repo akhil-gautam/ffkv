@@ -1,10 +1,15 @@
 #!/usr/bin/env python3
-"""Isolated Redis/ffkv comparison using the compiled redis-benchmark client.
+"""Isolated ffkv/Redis/Dragonfly comparison using the compiled redis-benchmark client.
 
 All endpoints are fresh owned children. Warmup and calibration are excluded from
 summary statistics. Durable runs measure acknowledged writes, not crash recovery.
+Engine/mode pairs without an equivalent local durability mechanism are recorded as
+explicit unsupported trials: never executed, never passes, never a win.
+Exit status: 0 all requested trials passed, 1 any failure, 3 no failures but some
+requested trials were unsupported.
 """
 import argparse
+import contextlib
 import csv
 import io
 import math
@@ -20,8 +25,10 @@ import sys
 import tempfile
 import time
 
-from runtime import (Client, OwnedServer, ResponseError, current_rss, environment,
-                     info_fields, jsonable, mapping, version, write_report)
+from runtime import (ENGINE_KINDS, ENGINE_MODES, UNSUPPORTED, Client, OwnedServer, ResponseError,
+                     affinity_error, affinity_prefix, cpu_list_argument, current_rss,
+                     dragonfly_args, dragonfly_settings, environment, info_fields, jsonable,
+                     linux_observations, mapping, version, write_report)
 
 
 PROFILES = {
@@ -53,6 +60,8 @@ LATENCY_SEMANTICS = (
     "Only fields actually emitted by this binary are reported; these source-level "
     "semantics were established for Redis 8.2.1, not arbitrary client versions."
 )
+# Redis 8.2.1 source-level semantics above are only claimed when the client reports it.
+NATIVE_CLIENT_VERSION = "8.2.1"
 
 
 def host_environment():
@@ -79,6 +88,8 @@ def host_environment():
             except (OSError, subprocess.SubprocessError) as error:
                 observation["error"] = str(error)
             result["macos_observations"].append(observation)
+    if platform.system() == "Linux":
+        result["linux_observations"] = linux_observations()
     return result
 
 
@@ -258,6 +269,21 @@ def persistence(client, mode):
     return result
 
 
+def process_threads(pid):
+    """Linux thread names of the owned server, outside timed execution."""
+    if platform.system() != "Linux":
+        return {"source": "unavailable off Linux"}
+    names = {}
+    try:
+        for task in Path(f"/proc/{pid}/task").iterdir():
+            with contextlib.suppress(OSError):
+                name = (task / "comm").read_text().strip()
+                names[name] = names.get(name, 0) + 1
+    except OSError as error:
+        return {"source": "unavailable", "error": str(error)}
+    return {"source": "/proc/PID/task/*/comm", "count": sum(names.values()), "names": names}
+
+
 def server_stats(client, engine):
     if engine == "ffkv":
         raw = client.command("FFKV.STATS")
@@ -323,11 +349,13 @@ def native_csv(stdout):
 
 def run_native(args, server, name, profile, count, phase):
     clients, pipeline, threads = PROFILES[profile]
-    command = [args.benchmark_binary, "-h", server.address[0], "-p", str(server.address[1]),
+    command = [*affinity_prefix(args.client_cpus),
+               args.benchmark_binary, "-h", server.address[0], "-p", str(server.address[1]),
                "-c", str(clients), "-P", str(pipeline), "--threads", str(threads),
                "-n", str(count), "-r", str(WORKLOADS[name][2]), "--seed", str(args.seed),
                "--csv", *workload_command(name)]
     result = {"phase": phase, "included_in_summary": phase == "measured", "command": command,
+              "client_cpus": args.client_cpus,
               "requested_commands": count, "seed": args.seed, "timeout_seconds": args.timeout,
               "stdout": "", "stderr": "", "exit_code": None, "timed_out": False,
               "errors": [], "ok": False, "latency_semantics": LATENCY_SEMANTICS}
@@ -395,24 +423,49 @@ def aligned_count(requested, profile, minimum, maximum):
     return max(low, min(high, math.ceil(requested / quantum) * quantum))
 
 
+def engine_launch(args, engine):
+    """Binary plus engine-specific tuning; every value is recorded with the trial."""
+    if engine == "ffkv":
+        return args.binary, ("--shards", str(args.ffkv_shards), "--wal-checkpoint-bytes", "0")
+    if engine == "dragonfly":
+        return args.dragonfly_binary, tuple(dragonfly_args(args.dragonfly_threads))
+    return args.redis_binary, ()
+
+
+def unsupported_trial(engine, mode, name, profile, repetition, order):
+    return {"engine": engine, "mode": mode, "storage": "memory", "workload": name,
+            "profile": profile, "clients": PROFILES[profile][0], "pipeline": PROFILES[profile][1],
+            "threads": PROFILES[profile][2], "repetition": repetition, "engine_order": order,
+            "status": "unsupported", "executed": False, "ok": False,
+            "unsupported": UNSUPPORTED[(engine, mode)], "phases": [], "correctness": [], "errors": []}
+
+
 def run_trial(args, engine, mode, name, profile, repetition, order, directory):
     trial = {"engine": engine, "mode": mode, "storage": "memory", "workload": name,
              "profile": profile, "clients": PROFILES[profile][0], "pipeline": PROFILES[profile][1],
              "threads": PROFILES[profile][2], "repetition": repetition, "engine_order": order,
-             "phases": [], "correctness": [], "errors": [], "ok": False}
-    server = OwnedServer(args.binary if engine == "ffkv" else args.redis_binary,
-                         directory, kind=engine, mode=mode, storage="memory", timeout=args.startup_timeout,
-                         extra_args=("--shards", "4", "--wal-checkpoint-bytes", "0") if engine == "ffkv" else ())
+             "executed": True, "phases": [], "correctness": [], "errors": [], "ok": False}
+    binary, extra_args = engine_launch(args, engine)
+    server = OwnedServer(binary, directory, kind=engine, mode=mode, storage="memory",
+                         timeout=args.startup_timeout, extra_args=extra_args, cpus=args.server_cpus)
+    trial["launch"] = {"binary": binary, "engine_args": list(extra_args), "server_cpus": args.server_cpus,
+                       "client_cpus": args.client_cpus, "directory": str(directory),
+                       "ffkv_shards": args.ffkv_shards if engine == "ffkv" else None,
+                       "dragonfly_proactor_threads": args.dragonfly_threads if engine == "dragonfly" else None}
     try:
         server.start()
-        trial.update(server_command=server.command_line, address=list(server.address), pid=server.process.pid)
+        trial.update(server_command=server.command_line, server_args=server.server_args,
+                     address=list(server.address), pid=server.process.pid,
+                     server_identity=server.identity, server_affinity=server.affinity)
         with Client(server.address, args.socket_timeout) as client:
             trial["stats_before_preload"] = server_stats(client, engine)
             if engine == "redis":
                 trial["persistence"] = persistence(client, mode)
+            elif engine == "dragonfly":
+                trial["persistence"] = dragonfly_settings(client, server, args.dragonfly_threads)
             else:
                 actual = trial["stats_before_preload"]["server"]
-                expected = {"shards": 4, "storage_mode": "memory",
+                expected = {"shards": args.ffkv_shards, "storage_mode": "memory",
                             "durability": "none" if mode == "memory" else mode}
                 trial["persistence"] = {
                     "ok": all(actual.get(setting) == value for setting, value in expected.items()),
@@ -420,6 +473,7 @@ def run_trial(args, engine, mode, name, profile, repetition, order, directory):
                     "expected": expected, "actual": actual, "wal_enabled": mode != "memory"}
             if not trial["persistence"]["ok"]:
                 raise AssertionError("effective server settings mismatch")
+            trial["server_threads_empty"] = process_threads(server.process.pid)
             trial["rss_empty"] = current_rss(server.process.pid)
             trial["preload"] = preload(client, name, args.preload_timeout)
 
@@ -479,6 +533,7 @@ def run_trial(args, engine, mode, name, profile, repetition, order, directory):
                 "sustained_at_least_one_second": duration is not None and duration >= 1.0,
                 "note": "native duration is requested count / reported rps; not independent timing"}
             trial["rss_after_measured"] = current_rss(server.process.pid)
+            trial["server_threads_after_measured"] = process_threads(server.process.pid)
             trial["stats_after_measured"] = server_stats(client, engine)
             after = check("after_measured")
             if name == "incr":
@@ -502,6 +557,7 @@ def run_trial(args, engine, mode, name, profile, repetition, order, directory):
             trial["errors"].append(f"cleanup: {type(error).__name__}: {error}")
         trial["server_exit_code"] = process.returncode if process is not None else None
     trial["ok"] = not trial["errors"]
+    trial["status"] = "pass" if trial["ok"] else "fail"
     return trial
 
 
@@ -512,8 +568,13 @@ def summarize(trials):
         group = groups.setdefault(group_key, {"engine": group_key[0], "mode": group_key[1],
                                             "workload": group_key[2], "profile": group_key[3],
                                             "successful_trials": 0, "failed_trials": 0,
+                                            "unsupported_trials": 0,
                                             "short_of_target_trials": 0, "subsecond_trials": 0,
                                             "native_requests_per_second": [], "wall_seconds": []})
+        if trial["status"] == "unsupported":
+            group["unsupported_trials"] += 1
+            group["unsupported"] = trial["unsupported"]
+            continue
         if not trial["ok"]:
             group["failed_trials"] += 1
             continue
@@ -526,15 +587,37 @@ def summarize(trials):
     for group in groups.values():
         values = group["native_requests_per_second"]
         group["median_native_requests_per_second"] = statistics.median(values) if values else None
-        group["complete"] = group["failed_trials"] == 0
+        group["complete"] = group["failed_trials"] == 0 and group["unsupported_trials"] == 0
+        # Unsupported is neither pass nor fail and is never comparable as a result.
+        group["status"] = ("fail" if group["failed_trials"] else
+                           "unsupported" if group["unsupported_trials"] else "pass")
     return list(groups.values())
+
+
+def client_version_check(observed):
+    match = re.search(r"redis-benchmark\s+(\S+)", observed.get("stdout", ""))
+    found = match.group(1) if match else None
+    return {"expected": NATIVE_CLIENT_VERSION, "observed": found,
+            "latency_semantics_source_matches": found == NATIVE_CLIENT_VERSION,
+            "note": "mismatch is recorded, not fatal; LATENCY_SEMANTICS are source-verified only for the expected version"}
 
 
 def parse_args():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--binary", default="target/release/ffkv", help="ffkv executable (memory storage for every mode)")
     parser.add_argument("--redis-binary", default="redis-server", help="owned Redis server executable")
+    parser.add_argument("--dragonfly-binary", default="dragonfly",
+                        help="owned Dragonfly server executable (only resolved when selected)")
     parser.add_argument("--benchmark-binary", default="redis-benchmark", help="compiled redis-benchmark executable")
+    parser.add_argument("--engines", nargs="+", choices=ENGINE_KINDS, default=["ffkv", "redis"],
+                        help="engines in repetition-0 order; rotated by one each repetition (default: ffkv redis)")
+    parser.add_argument("--ffkv-shards", type=int, default=4, help="ffkv --shards (default: 4)")
+    parser.add_argument("--dragonfly-threads", type=int, default=4,
+                        help="Dragonfly --proactor_threads (default: 4)")
+    parser.add_argument("--server-cpus", type=cpu_list_argument, default=None,
+                        help="Linux only: taskset cpu list for every owned server, e.g. 0-3")
+    parser.add_argument("--client-cpus", type=cpu_list_argument, default=None,
+                        help="Linux only: taskset cpu list for redis-benchmark, disjoint from --server-cpus")
     parser.add_argument("--workloads", nargs="+", choices=WORKLOADS, default=list(WORKLOADS),
                         help="memory workload selection; durability modes only run selected set-256")
     parser.add_argument("--profiles", nargs="+", choices=PROFILES,
@@ -567,6 +650,15 @@ def parse_args():
         parser.error("--seed must be between 0 and 2147483647")
     if "memory" not in args.modes and "set-256" not in args.workloads:
         parser.error("durable modes require set-256 in --workloads")
+    if len(set(args.engines)) != len(args.engines):
+        parser.error("--engines must not repeat an engine")
+    if not 1 <= args.ffkv_shards <= 256:
+        parser.error("--ffkv-shards must be between 1 and 256")
+    if not 1 <= args.dragonfly_threads <= 1024:
+        parser.error("--dragonfly-threads must be between 1 and 1024")
+    error = affinity_error(args.server_cpus, args.client_cpus)
+    if error:
+        parser.error(error)
     for profile in args.profiles:
         try:
             aligned_count(args.min_requests, profile, args.min_requests, args.max_requests)
@@ -577,11 +669,19 @@ def parse_args():
 
 def main():
     args = parse_args()
+    unsupported = sorted({(engine, mode) for engine in args.engines for mode in args.modes
+                          if mode not in ENGINE_MODES[engine]})
+    for engine, mode in unsupported:
+        print(f"unsupported: {engine} {mode}; recorded as unsupported trials, not executed",
+              file=sys.stderr, flush=True)
     report = {"schema_version": 1, "ok": False, "environment": host_environment(), "settings": vars(args).copy(),
               "started_unix_seconds": time.time(), "trials": [], "errors": [], "versions": {},
+              "unsupported_combinations": [{"engine": engine, "mode": mode, **UNSUPPORTED[(engine, mode)]}
+                                           for engine, mode in unsupported],
               "methodology": {"load_generator": "compiled redis-benchmark; Python only orchestrates",
                               "isolation": "fresh owned child and temporary directory per engine/case/repetition",
-                              "engine_order": "ffkv then redis on even zero-based repetitions; reversed on odd",
+                              "engine_order": "--engines order on repetition 0, rotated left by one per repetition; two engines alternate",
+                              "engine_order_balanced": args.repetitions % len(args.engines) == 0,
                               "random_keys": "native-bench: plus 12 zero-padded digits; uniform native -r domain",
                               "writes": "SET/HSET vary a fixed-width numeric payload suffix; ZADD varies the existing member score, rather than timing only same-value no-ops",
                               "latency": LATENCY_SEMANTICS,
@@ -591,28 +691,45 @@ def main():
                               "calibration": "2000-5000 request pilot, separate 2000-5000 request warmup",
                               "calibration_refinement": "bounded additional pilots up to one native second, at most calibration-iterations",
                               "maintenance": "ffkv automatic WAL checkpoints and Redis auto AOF rewrites disabled",
-                              "ffkv_shards": 4,
+                              "ffkv_shards": args.ffkv_shards,
+                              "dragonfly": {"proactor_threads": args.dragonfly_threads,
+                                            "memory_mode": "--dbfilename= (no load/shutdown save), --snapshot_cron= (no periodic snapshot), --version_check=false, --logtostderr",
+                                            "other_flags": "Dragonfly defaults (pipeline_squash, maxmemory auto, epoll/io_uring auto)",
+                                            "durable_modes": "unsupported; recorded, never executed, never counted as pass"},
+                              "redis": "single-threaded default io-threads; no thread tuning",
+                              "cpu_affinity": {"server_cpus": args.server_cpus, "client_cpus": args.client_cpus,
+                                               "method": "taskset -c prefix execs into the target, so the owned PID is the engine; server affinity verified with sched_getaffinity",
+                                               "client_verification": "taskset failure is a native nonzero exit; client PID affinity not resampled"},
                               "durability": "acknowledged-write benchmark; no crash-recovery or equal guarantee claim",
                               "cpu": "server cumulative CPU around native process; includes startup/client handshake interval",
                               "seed_limit": "fixed seed does not promise identical interleaving across native client threads"}}
     started = time.monotonic()
     try:
-        for field in ("binary", "redis_binary", "benchmark_binary"):
+        fields = {"ffkv": "binary", "redis": "redis_binary", "dragonfly": "dragonfly_binary"}
+        for field in [fields[engine] for engine in ENGINE_KINDS if engine in args.engines] + ["benchmark_binary"]:
             candidate = getattr(args, field)
             resolved = shutil.which(candidate)
             if resolved is None:
                 raise FileNotFoundError(f"{field}: executable not found: {candidate}")
             setattr(args, field, str(Path(resolved).resolve()))
             report["versions"][field] = version(getattr(args, field))
+        report["client_version_check"] = client_version_check(report["versions"]["benchmark_binary"])
+        if not report["client_version_check"]["latency_semantics_source_matches"]:
+            report["environment"]["limitations"].append(
+                f"redis-benchmark is not {NATIVE_CLIENT_VERSION}; latency semantics are unverified for this client.")
         report["resolved_settings"] = vars(args).copy()
         for repetition in range(args.repetitions):
-            order = ["ffkv", "redis"] if repetition % 2 == 0 else ["redis", "ffkv"]
+            shift = repetition % len(args.engines)
+            order = args.engines[shift:] + args.engines[:shift]
             for mode in args.modes:
                 for name in args.workloads:
                     if mode != "memory" and name != "set-256":
                         continue
                     for profile in args.profiles:
                         for engine in order:
+                            if mode not in ENGINE_MODES[engine]:
+                                report["trials"].append(unsupported_trial(engine, mode, name, profile, repetition, order))
+                                continue
                             print(f"[{repetition + 1}/{args.repetitions}] {engine} {mode} {name} {profile}",
                                   file=sys.stderr, flush=True)
                             with tempfile.TemporaryDirectory(prefix="ffkv-native-compare-") as directory:
@@ -624,16 +741,21 @@ def main():
                                 write_report(report, args.json)
                             if trial.get("interrupted"):
                                 raise KeyboardInterrupt()
-        report["ok"] = bool(report["trials"]) and all(trial["ok"] for trial in report["trials"])
+        report["ok"] = bool(report["trials"]) and all(trial["status"] == "pass" for trial in report["trials"])
     except (Exception, KeyboardInterrupt) as error:
         report["errors"].append(f"{type(error).__name__}: {error}")
         report["ok"] = False
     finally:
         report["elapsed_seconds"] = time.monotonic() - started
         report["summary"] = summarize(report["trials"])
-        report["failed_trials"] = sum(not trial["ok"] for trial in report["trials"])
+        report["failed_trials"] = sum(trial["status"] == "fail" for trial in report["trials"])
+        report["unsupported_trials"] = sum(trial["status"] == "unsupported" for trial in report["trials"])
+        report["passed_trials"] = sum(trial["status"] == "pass" for trial in report["trials"])
+        report["status"] = ("pass" if report["ok"] else
+                            "fail" if report["failed_trials"] or report["errors"] or not report["trials"] else
+                            "unsupported")
         write_report(report, args.json)
-    return 0 if report["ok"] else 1
+    return 0 if report["status"] == "pass" else 3 if report["status"] == "unsupported" else 1
 
 
 if __name__ == "__main__":

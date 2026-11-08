@@ -1,6 +1,6 @@
 //! Command, directional key and channel permissions must be granted together by
 //! one ACL selector. Protocol metadata supplies canonical core classifications.
-use super::{CommandSpec, Engine, Resp, catalog, effective_spec, registry};
+use super::{CommandSpec, Engine, Resp, catalog, registry};
 use crate::auth::{KeyAccess, User};
 use bytes::Bytes;
 
@@ -86,27 +86,22 @@ fn access(spec: &CommandSpec, args: &[Bytes], position: usize) -> KeyAccess {
 }
 
 impl Engine {
-    pub fn authorize(args: &[Bytes], user: &User) -> Result<(), Resp> {
-        Self::authorize_logged(args, user, None)
-    }
-    pub fn authorize_logged(
+    /// ACL decision for an admitted command's effective registration. Key
+    /// positions are produced only when a restricted selector needs them.
+    pub(super) fn authorize_spec(
+        spec: &CommandSpec,
         args: &[Bytes],
+        positions: impl FnOnce() -> Option<super::key_specs::KeyPositions>,
         user: &User,
         audit: Option<&crate::auth::Audit<'_>>,
     ) -> Result<(), Resp> {
-        Self::validate(args)?;
-        Self::authorize_admission_logged(args, user, audit)
-    }
-
-    /// Queue admission still checks command/channel ACLs when invalid key counts
-    /// prevent extracting keys. Full validation is required before execution.
-    pub fn authorize_admission_logged(
-        args: &[Bytes],
-        user: &User,
-        audit: Option<&crate::auth::Audit<'_>>,
-    ) -> Result<(), Resp> {
-        Self::validate_admission(args)?;
-        let spec = effective_spec(args).expect("validated command metadata");
+        // User::check consults the root selector first and returns Ok for this
+        // policy before charging glob work or auditing, so the command, key and
+        // channel metadata below cannot change the decision. Only the root
+        // qualifies: later selectors run after earlier ones may deny or fail.
+        if user.unrestricted_root() {
+            return Ok(());
+        }
         let categories = categories(spec);
         let global = spec.name.starts_with("ffkv.")
             || matches!(
@@ -138,7 +133,7 @@ impl Engine {
             )
             .map_err(|_| denied())
         };
-        let Some(positions) = spec.key_positions(args).ok().flatten() else {
+        let Some(positions) = positions() else {
             return check(&[]);
         };
         let capacity = positions.size_hint().1.unwrap_or(usize::MAX);

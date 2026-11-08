@@ -5,6 +5,7 @@ use super::super::{
 };
 use super::*;
 use rand::{Rng, seq::IteratorRandom};
+use std::convert::Infallible;
 
 #[derive(Clone)]
 enum LexBound {
@@ -144,33 +145,23 @@ impl RangeOptions {
             count,
         })
     }
-    fn select(
+    /// Visit the selected entries in reply order without copying any of them;
+    /// the visitor owns budgeting and the result representation.
+    fn walk<E>(
         &self,
         value: &SortedSetValue,
-        budget: Option<usize>,
-    ) -> Result<Vec<(Score, Bytes)>, Resp> {
-        let mut result = Vec::new();
-        let mut budget = budget.map(ReplyBudget::new);
-        let mut push = |score: Score, member: &Bytes| -> Result<(), Resp> {
-            if let Some(budget) = budget.as_mut() {
-                budget.charge(
-                    if self.with_scores { 2 } else { 1 },
-                    member.len() + if self.with_scores { 32 } else { 0 },
-                )?;
-            }
-            result.push((score, member.clone()));
-            Ok(())
-        };
+        mut visit: impl FnMut(Score, &Bytes) -> Result<(), E>,
+    ) -> Result<(), E> {
         match &self.mode {
             RangeMode::Rank(start, stop) => {
                 let (offset, count) = rank_window(*start, *stop, value.members.len());
                 if self.reverse {
                     for (score, member) in value.ordered.iter().rev().skip(offset).take(count) {
-                        push(*score, member)?;
+                        visit(*score, member)?;
                     }
                 } else {
                     for (score, member) in value.ordered.iter().skip(offset).take(count) {
-                        push(*score, member)?;
+                        visit(*score, member)?;
                     }
                 }
             }
@@ -183,7 +174,7 @@ impl RangeOptions {
                         .skip(self.offset)
                         .take(self.count)
                     {
-                        push(*score, member)?;
+                        visit(*score, member)?;
                     }
                 } else {
                     for (score, member) in value
@@ -192,7 +183,7 @@ impl RangeOptions {
                         .skip(self.offset)
                         .take(self.count)
                     {
-                        push(*score, member)?;
+                        visit(*score, member)?;
                     }
                 }
             }
@@ -205,7 +196,7 @@ impl RangeOptions {
                         .skip(self.offset)
                         .take(self.count)
                     {
-                        push(value.members[member], member)?;
+                        visit(value.members[member], member)?;
                     }
                 } else {
                     for member in value
@@ -214,30 +205,62 @@ impl RangeOptions {
                         .skip(self.offset)
                         .take(self.count)
                     {
-                        push(value.members[member], member)?;
+                        visit(value.members[member], member)?;
                     }
                 }
             }
             _ => {}
         }
-        Ok(result)
+        Ok(())
     }
-}
-fn selected_reply(entries: Vec<(Score, Bytes)>, with_scores: bool) -> Resp {
-    if with_scores {
-        Resp::Scored(
-            entries
-                .into_iter()
-                .map(|(score, member)| (member, score.0))
-                .collect(),
-        )
-    } else {
-        array(
-            entries
-                .into_iter()
-                .map(|(_, member)| Resp::Bulk(Some(member)))
-                .collect(),
-        )
+    /// Exact length of a rank window; score and lex windows are only known by walking.
+    fn rank_len(&self, value: &SortedSetValue) -> Option<usize> {
+        match self.mode {
+            RangeMode::Rank(start, stop) => Some(rank_window(start, stop, value.members.len()).1),
+            _ => None,
+        }
+    }
+    /// Budget every selected entry and build the final reply directly. A rank
+    /// window is presized only when the budget could admit all of its rows;
+    /// score/lex windows and doomed rank windows grow on demand.
+    fn reply(&self, value: &SortedSetValue, limit: usize) -> Resp {
+        let mut budget = ReplyBudget::new(limit);
+        let rows = if self.with_scores { 2 } else { 1 };
+        let capacity = self
+            .rank_len(value)
+            .filter(|&count| count <= limit / (rows * std::mem::size_of::<Resp>()))
+            .unwrap_or(0);
+        if self.with_scores {
+            let mut entries = Vec::with_capacity(capacity);
+            if let Err(error) = self.walk(value, |score, member| -> Result<(), Resp> {
+                budget.charge(2, member.len() + 32)?;
+                entries.push((member.clone(), score.0));
+                Ok(())
+            }) {
+                return error;
+            }
+            Resp::Scored(entries)
+        } else {
+            let mut entries = Vec::with_capacity(capacity);
+            if let Err(error) = self.walk(value, |_, member| -> Result<(), Resp> {
+                budget.charge(1, member.len())?;
+                entries.push(Resp::Bulk(Some(member.clone())));
+                Ok(())
+            }) {
+                return error;
+            }
+            array(entries)
+        }
+    }
+    /// Own the selection so ZRANGESTORE can overwrite its own source afterwards.
+    /// Rank windows are bounded by the source's size, so they presize exactly.
+    fn owned(&self, value: &SortedSetValue) -> Vec<(Score, Bytes)> {
+        let mut entries = Vec::with_capacity(self.rank_len(value).unwrap_or(0));
+        let Ok(()) = self.walk(value, |score, member| -> Result<(), Infallible> {
+            entries.push((score, member.clone()));
+            Ok(())
+        });
+        entries
     }
 }
 
@@ -343,19 +366,19 @@ impl Engine {
         };
         let source = &args[if store { 2 } else { 1 }];
         let limit = self.reply_limit;
-        let entries = match self.sorted_set(source, now) {
-            Ok(Some(value)) => match options.select(value, (!store).then_some(limit)) {
-                Ok(v) => v,
-                Err(e) => return e,
-            },
-            Ok(None) => Vec::new(),
+        let value = match self.sorted_set(source, now) {
+            Ok(value) => value,
             Err(e) => return e,
         };
-        if store {
-            self.zreplace(&args[1], entries, now)
-        } else {
-            selected_reply(entries, options.with_scores)
+        if !store {
+            return match value {
+                Some(value) => options.reply(value, limit),
+                None if options.with_scores => Resp::Scored(Vec::new()),
+                None => array(Vec::new()),
+            };
         }
+        let entries = value.map_or_else(Vec::new, |value| options.owned(value));
+        self.zreplace(&args[1], entries, now)
     }
     fn zreplace(&mut self, destination: &Bytes, entries: Vec<(Score, Bytes)>, now: i64) -> Resp {
         let count = entries.len();
@@ -370,10 +393,10 @@ impl Engine {
         }
         if !entries.is_empty() {
             let journaling = self.journal_enabled;
-            let mut updates = Vec::new();
-            let Value::SortedSet(value) = self.collection_entry(destination, now, || {
-                Value::SortedSet(SortedSetValue::default())
-            }) else {
+            let mut updates = Vec::with_capacity(if journaling { entries.len() } else { 0 });
+            let Value::SortedSet(value) =
+                self.collection_entry(destination, now, || Value::SortedSet(Box::default()))
+            else {
                 unreachable!()
             };
             for (score, member) in entries {
@@ -785,6 +808,71 @@ mod tests {
                 .collect::<Vec<_>>(),
             1000,
         )
+    }
+
+    fn bulk(member: &'static [u8]) -> Resp {
+        Resp::Bulk(Some(Bytes::from_static(member)))
+    }
+
+    #[test]
+    fn rank_range_budget_is_exact_and_store_owns_its_selection() {
+        let mut engine = Engine::new();
+        run(&mut engine, &["ZADD", "z", "1", "a", "2", "bb", "3", "c"]);
+        let original = engine.reply_limit;
+        let row = std::mem::size_of::<Resp>();
+        let scored = row * 2 + 32;
+        let tail = || {
+            Resp::Scored(vec![
+                (Bytes::from_static(b"bb"), 2.0),
+                (Bytes::from_static(b"c"), 3.0),
+            ])
+        };
+        let wide = ["ZRANGE", "z", "-2", "9223372036854775807", "WITHSCORES"];
+        // A member costs one row plus its bytes; WITHSCORES adds a row and 32 bytes.
+        for (limit, command, reply) in [
+            (
+                row * 2 + 3,
+                &["ZRANGE", "z", "0", "1"][..],
+                array(vec![bulk(b"a"), bulk(b"bb")]),
+            ),
+            (
+                row * 2 + 2,
+                &["ZRANGE", "z", "0", "1"][..],
+                reply_limit_error(),
+            ),
+            (scored * 2 + 3, &wide[..], tail()),
+            (scored * 2 + 2, &wide[..], reply_limit_error()),
+            (
+                row + 1,
+                &["ZRANGE", "z", "0", "0", "REV"][..],
+                array(vec![bulk(b"c")]),
+            ),
+            (
+                row,
+                &["ZRANGE", "z", "0", "0", "REV"][..],
+                reply_limit_error(),
+            ),
+        ] {
+            engine.set_reply_limit(limit);
+            assert_eq!(run(&mut engine, command), reply, "{command:?} at {limit}");
+        }
+        // ZRANGESTORE budgets only its integer reply, owns the selection before
+        // replacing its own source, and leaves it untouched when rejected.
+        engine.set_reply_limit(row - 1);
+        assert_eq!(
+            run(&mut engine, &["ZRANGESTORE", "z", "z", "1", "-1"]),
+            reply_limit_error()
+        );
+        engine.set_reply_limit(row);
+        assert_eq!(
+            run(&mut engine, &["ZRANGESTORE", "z", "z", "1", "-1"]),
+            Resp::Integer(2)
+        );
+        engine.set_reply_limit(original);
+        assert_eq!(
+            run(&mut engine, &["ZRANGE", "z", "0", "-1", "WITHSCORES"]),
+            tail()
+        );
     }
 
     #[test]

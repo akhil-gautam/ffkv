@@ -7,19 +7,30 @@ use bytes::Bytes;
 
 use super::scan::{ScanIndex, parse_scan, scan_entries, stable_hash};
 use super::{
-    CommandSpec, Engine, Mutation, Resp, Value, array, error, integer, integer_error,
-    invalid_journal, syntax_error, wrong_arity, wrong_type,
+    CommandSpec, Engine, Mutation, Resp, StringValue, StringWrite, Value, array, error, integer,
+    integer_error, invalid_journal, syntax_error, wrong_arity, wrong_type,
 };
 
 #[path = "hash_compat.rs"]
 pub(super) mod compat;
 
+/// A resolved `Mutation::HashSet` row: field, value and deadline.
+type FieldRow = (Bytes, Bytes, Option<i64>);
+
 struct HashField {
-    value: Bytes,
+    /// Owned like a stored string: never a view into request, WAL or dump
+    /// bytes, and immutable once viewed.
+    value: StringValue,
     expires_at: Option<i64>,
+    /// Slot in `random_fields`, which holds this field's owned name.
     position: usize,
 }
 
+/// Every name in `fields`, `retained_fields`, `expirations`, `index` and
+/// `random_fields` is an engine-made copy of just that name, never a view
+/// into request, replay or dump bytes.
+/// A field is active (`fields`) or held past its deadline for the expiry
+/// owner (`retained_fields`), never both.
 #[derive(Default)]
 pub(super) struct HashValue {
     fields: HashMap<Bytes, HashField>,
@@ -27,6 +38,108 @@ pub(super) struct HashValue {
     expirations: BTreeSet<(i64, Bytes)>,
     index: ScanIndex,
     random_fields: Vec<Bytes>,
+}
+
+/// A written field's deadline: kept from the active field (none for a new
+/// one, including a held field written again) or replaced.
+#[derive(Clone, Copy)]
+enum FieldTtl {
+    Keep,
+    Set(Option<i64>),
+}
+
+/// One value write. `position` is the field's `random_fields` slot, whose
+/// owned name its journal row carries; `captured` is that row's value.
+struct Written {
+    position: usize,
+    added: bool,
+    expires_at: Option<i64>,
+    captured: Option<Bytes>,
+}
+
+/// Journal rows of one command's value writes, in input order.
+struct WrittenRows {
+    rows: Vec<FieldRow>,
+    /// `(position, row)` per row, kept only when a field may repeat.
+    order: Vec<(usize, usize)>,
+    repeatable: bool,
+}
+
+impl WrittenRows {
+    fn new(capture: bool, writes: usize) -> Self {
+        let repeatable = capture && writes > 1;
+        Self {
+            rows: if capture {
+                Vec::with_capacity(writes)
+            } else {
+                Vec::new()
+            },
+            order: if repeatable {
+                Vec::with_capacity(writes)
+            } else {
+                Vec::new()
+            },
+            repeatable,
+        }
+    }
+
+    fn push(&mut self, hash: &HashValue, written: Written) {
+        let position = written.position;
+        if let Some(row) = hash.written_row(written) {
+            if self.repeatable {
+                self.order.push((position, self.rows.len()));
+            }
+            self.rows.push(row);
+        }
+    }
+
+    /// A repeated field repeats its final value and deadline in every row.
+    /// Positions are stable while a command only writes, so equal positions
+    /// are equal fields.
+    fn finish(mut self) -> Vec<FieldRow> {
+        if self.order.len() > 1 {
+            self.order.sort_unstable();
+            for group in self.order.chunk_by(|left, right| left.0 == right.0) {
+                if let [earlier @ .., (_, last)] = group
+                    && !earlier.is_empty()
+                {
+                    let (value, deadline) = (self.rows[*last].1.clone(), self.rows[*last].2);
+                    for (_, row) in earlier {
+                        self.rows[*row].1 = value.clone();
+                        self.rows[*row].2 = deadline;
+                    }
+                }
+            }
+        }
+        self.rows
+    }
+}
+
+/// Moves `name`'s row in a hash's field deadline index.
+fn retime(
+    expirations: &mut BTreeSet<(i64, Bytes)>,
+    name: &Bytes,
+    from: Option<i64>,
+    to: Option<i64>,
+) {
+    if from == to {
+        return;
+    }
+    if let Some(deadline) = from {
+        expirations.remove(&(deadline, name.clone()));
+    }
+    if let Some(deadline) = to {
+        expirations.insert((deadline, name.clone()));
+    }
+}
+
+/// What finalizing a write needs from the written hash, read while the writer
+/// still borrows it rather than by looking the key up again.
+#[derive(Clone, Copy, Default)]
+struct HashState {
+    empty: bool,
+    retained: bool,
+    next_expiry: Option<i64>,
 }
 
 /// Includes real field deadlines; filtering uses the snapshot's frozen clock.
@@ -46,7 +159,7 @@ impl<'a> Iterator for Snapshot<'a> {
             (!value
                 .expires_at
                 .is_some_and(|deadline| deadline <= self.now_ms))
-            .then_some((field, &value.value, value.expires_at))
+            .then_some((field, value.value.bytes(), value.expires_at))
         })
     }
 }
@@ -65,7 +178,7 @@ impl HashValue {
             .saturating_add(sampled(self.fields.iter(), samples, |(field, value)| {
                 bodies
                     .bytes(field)
-                    .saturating_add(bodies.bytes(&value.value))
+                    .saturating_add(bodies.bytes(value.value.bytes()))
             }))
             .saturating_add(sampled(
                 self.retained_fields.iter(),
@@ -73,7 +186,7 @@ impl HashValue {
                 |(field, value)| {
                     bodies
                         .bytes(field)
-                        .saturating_add(bodies.bytes(&value.value))
+                        .saturating_add(bodies.bytes(value.value.bytes()))
                 },
             ))
     }
@@ -89,7 +202,7 @@ impl HashValue {
         self.fields
             .get(field)
             .filter(|value| value.expires_at.is_none_or(|deadline| deadline > now))
-            .map(|value| &value.value)
+            .map(|value| value.value.bytes())
     }
 
     pub(super) fn next_expiry(&self) -> Option<i64> {
@@ -100,47 +213,128 @@ impl HashValue {
         !self.retained_fields.is_empty()
     }
 
+    fn state(&self) -> HashState {
+        HashState {
+            empty: self.fields.is_empty(),
+            retained: self.has_retained_fields(),
+            next_expiry: self.next_expiry(),
+        }
+    }
+
+    /// Journal rows for fields whose deadline changed, in input order; a
+    /// repeated field repeats its final value and deadline. A TTL rewrite
+    /// journals an immutable view of the unchanged value.
+    fn written_rows<'a>(&self, fields: impl Iterator<Item = &'a Bytes>) -> Vec<FieldRow> {
+        fields
+            .map(|field| {
+                let value = self.fields.get(field).expect("written hash field");
+                (field.clone(), value.value.bytes().clone(), value.expires_at)
+            })
+            .collect()
+    }
+
+    /// The journal row of a write made with `capture`.
+    fn written_row(&self, written: Written) -> Option<FieldRow> {
+        written.captured.map(|value| {
+            (
+                self.random_fields[written.position].clone(),
+                value,
+                written.expires_at,
+            )
+        })
+    }
+
+    /// Moves held fields back, keeping their owned names and values.
     pub(super) fn restore_retained_fields(&mut self) {
         let mut retained = std::mem::take(&mut self.retained_fields);
         for (field, value) in retained.drain() {
-            self.set(field, value.value, value.expires_at);
+            self.insert_new(field, value.value, value.expires_at);
         }
         self.retained_fields = retained;
     }
 
-    fn set(&mut self, field: Bytes, value: Bytes, expires_at: Option<i64>) -> bool {
-        self.retained_fields.remove(&field);
-        if let Some(previous) = self.fields.get_mut(&field) {
-            if previous.expires_at != expires_at {
-                if let Some(deadline) = previous.expires_at {
-                    self.expirations.remove(&(deadline, field.clone()));
-                }
-                if let Some(deadline) = expires_at {
-                    self.expirations.insert((deadline, field));
-                }
-            }
-            previous.value = value;
-            previous.expires_at = expires_at;
-            false
-        } else {
-            self.index.insert((stable_hash(&field), field.clone()));
-            if let Some(deadline) = expires_at {
-                self.expirations.insert((deadline, field.clone()));
-            }
-            let position = self.random_fields.len();
-            self.random_fields.push(field.clone());
-            self.fields.insert(
-                field,
-                HashField {
-                    value,
-                    expires_at,
-                    position,
-                },
+    /// Writes `field`'s value. An active field keeps its name and reuses its
+    /// unshared storage; a held one is reactivated with its name and storage;
+    /// only an unknown field copies its name. With `capture`, the result
+    /// carries the journal value `StringValue::apply` resolves.
+    fn write_field(
+        &mut self,
+        field: &Bytes,
+        write: StringWrite<'_>,
+        ttl: FieldTtl,
+        capture: bool,
+    ) -> Written {
+        if let Some(current) = self.fields.get_mut(field) {
+            let captured = current.value.apply(write, capture);
+            let expires_at = match ttl {
+                FieldTtl::Keep => current.expires_at,
+                FieldTtl::Set(deadline) => deadline,
+            };
+            retime(
+                &mut self.expirations,
+                &self.random_fields[current.position],
+                current.expires_at,
+                expires_at,
             );
-            true
+            current.expires_at = expires_at;
+            return Written {
+                position: current.position,
+                added: false,
+                expires_at,
+                captured,
+            };
+        }
+        let expires_at = match ttl {
+            FieldTtl::Keep => None,
+            FieldTtl::Set(deadline) => deadline,
+        };
+        // Active and held fields are disjoint: only a missing field can be held.
+        let held = if self.retained_fields.is_empty() {
+            None
+        } else {
+            self.retained_fields.remove_entry(field)
+        };
+        let (name, value, captured) = match held {
+            Some((name, mut held)) => {
+                let captured = held.value.apply(write, capture);
+                (name, held.value, captured)
+            }
+            None => {
+                let (value, captured) = StringValue::new(write, capture);
+                (Bytes::copy_from_slice(field), value, captured)
+            }
+        };
+        let position = self.insert_new(name, value, expires_at);
+        Written {
+            position,
+            added: true,
+            expires_at,
+            captured,
         }
     }
 
+    /// Inserts a field that is neither active nor held under its owned
+    /// `name`, returning its position.
+    fn insert_new(&mut self, name: Bytes, value: StringValue, expires_at: Option<i64>) -> usize {
+        self.index.insert((stable_hash(&name), name.clone()));
+        if let Some(deadline) = expires_at {
+            self.expirations.insert((deadline, name.clone()));
+        }
+        let position = self.random_fields.len();
+        self.random_fields.push(name.clone());
+        let replaced = self.fields.insert(
+            name,
+            HashField {
+                value,
+                expires_at,
+                position,
+            },
+        );
+        debug_assert!(replaced.is_none(), "an inserted hash field is new");
+        position
+    }
+
+    /// Removes an active field, returning its owned name and contents.
     fn detach(&mut self, field: &Bytes) -> Option<(Bytes, HashField)> {
         let (owned, previous) = self.fields.remove_entry(field)?;
         self.random_fields.swap_remove(previous.position);
@@ -150,29 +344,31 @@ impl HashValue {
                 .expect("indexed hash field")
                 .position = previous.position;
         }
-        self.index.remove(&(stable_hash(field), field.clone()));
+        let row = (stable_hash(&owned), owned);
+        self.index.remove(&row);
+        let (_, owned) = row;
         if let Some(deadline) = previous.expires_at {
-            self.expirations.remove(&(deadline, field.clone()));
+            self.expirations.remove(&(deadline, owned.clone()));
         }
         Some((owned, previous))
     }
 
-    fn remove(&mut self, field: &Bytes) -> bool {
-        self.detach(field).is_some()
+    /// Removes an active field, returning its owned name.
+    fn remove(&mut self, field: &Bytes) -> Option<Bytes> {
+        self.detach(field).map(|(owned, _)| owned)
     }
 
-    fn set_expiry(&mut self, field: &Bytes, expires_at: Option<i64>) {
-        let value = self.fields.get_mut(field).expect("existing hash field");
-        if value.expires_at == expires_at {
-            return;
-        }
-        if let Some(deadline) = value.expires_at {
-            self.expirations.remove(&(deadline, field.clone()));
-        }
-        value.expires_at = expires_at;
-        if let Some(deadline) = expires_at {
-            self.expirations.insert((deadline, field.clone()));
-        }
+    /// Retimes an active field, returning its position (its owned name).
+    fn set_expiry(&mut self, field: &Bytes, expires_at: Option<i64>) -> usize {
+        let current = self.fields.get_mut(field).expect("existing hash field");
+        retime(
+            &mut self.expirations,
+            &self.random_fields[current.position],
+            current.expires_at,
+            expires_at,
+        );
+        current.expires_at = expires_at;
+        current.position
     }
 }
 
@@ -198,7 +394,7 @@ pub(super) static COMMANDS: &[CommandSpec] = &[
         (1, 1, 1),
         Engine::hsetnx,
     ),
-    CommandSpec::handler("hget", 3, &["readonly", "fast"], (1, 1, 1), Engine::hget),
+    CommandSpec::read("hget", 3, &["readonly", "fast"], (1, 1, 1), Engine::hget),
     CommandSpec::handler("hmget", -3, &["readonly", "fast"], (1, 1, 1), Engine::hmget),
     CommandSpec::handler(
         "hgetall",
@@ -369,34 +565,43 @@ impl Engine {
     fn hash_value(&mut self, key: &Bytes, now: i64) -> Result<Option<&HashValue>, Resp> {
         match self.value(key, now) {
             None => Ok(None),
-            Some(Value::Hash(hash)) => Ok(Some(hash)),
+            Some(Value::Hash(hash)) => Ok(Some(&**hash)),
             Some(_) => Err(wrong_type()),
         }
     }
 
     fn finish_hash_mutation(&mut self, key: &Bytes, previous: Option<i64>) {
-        let (empty, retained) = match self.entries.get(key).map(|entry| &entry.value) {
-            Some(Value::Hash(hash)) => (hash.fields.is_empty(), hash.has_retained_fields()),
-            _ => (false, false),
+        let state = match self.entries.get(key).map(|entry| &entry.value) {
+            Some(Value::Hash(hash)) => hash.state(),
+            _ => HashState::default(),
         };
-        if !retained {
+        self.finish_hash_mutation_with(key, previous, state);
+    }
+
+    /// `state` describes `key`'s hash after the write being finished.
+    fn finish_hash_mutation_with(&mut self, key: &Bytes, previous: Option<i64>, state: HashState) {
+        if !state.retained {
             self.retained_hashes.remove(key);
         }
-        if empty {
-            let retain = retained && self.holding_expiry(key);
-            if retain {
+        let next = if state.empty {
+            if state.retained && self.holding_expiry(key) {
                 if let Some((key, entry)) = self.detach_entry(key) {
                     self.held_entries.insert(key, entry);
                 }
             } else {
                 self.remove(key);
             }
-        }
-        self.refresh_hash_deadline(key, previous);
+            // Neither `entries` nor the deadline index keeps the emptied hash.
+            None
+        } else {
+            state.next_expiry
+        };
+        self.refresh_hash_deadline_to(key, previous, next);
     }
 
     // Indexing and waiter visibility need the same resolved changes even without
-    // an ordinary AOF. Materialize only fields actually written.
+    // an ordinary AOF. Materialize only fields actually retimed; value writes
+    // build their rows while writing (`WrittenRows`).
     fn record_hash_fields<'a>(
         &mut self,
         key: &Bytes,
@@ -412,16 +617,15 @@ impl Engine {
         let Value::Hash(hash) = &entry.value else {
             return;
         };
-        let fields: Vec<_> = fields
-            .map(|field| {
-                let value = hash.fields.get(field).expect("written hash field");
-                (field.clone(), value.value.clone(), value.expires_at)
-            })
-            .collect();
-        if !fields.is_empty() {
+        let rows = hash.written_rows(fields);
+        self.record_hash_rows(key, rows, now);
+    }
+
+    fn record_hash_rows(&mut self, key: &Bytes, rows: Vec<FieldRow>, now: i64) {
+        if !rows.is_empty() {
             self.record(now, || Mutation::HashSet {
                 key: key.clone(),
-                fields,
+                fields: rows,
             });
         }
     }
@@ -431,25 +635,40 @@ impl Engine {
         if !args.len().is_multiple_of(2) {
             return wrong_arity(if hmset { "hmset" } else { "hset" });
         }
-        if let Err(reply) = self.hash_value(&args[1], now) {
-            return reply;
-        }
-        let previous = self.hash_deadline(&args[1]);
-        let Value::Hash(hash) =
-            self.collection_entry(&args[1], now, || Value::Hash(HashValue::default()))
-        else {
-            unreachable!("hash type validated");
+        let key = &args[1];
+        let pairs = args[2..].as_chunks::<2>().0;
+        // `hash_value`'s validation, keeping the borrow: the written hash itself
+        // supplies both deadlines, retention and the journal rows. Only a
+        // missing key pays for creation's lookups.
+        self.discard_expired(key, now);
+        let journal = self.capturing_changes();
+        let write = |hash: &mut HashValue| {
+            let previous = hash.next_expiry();
+            let mut added = 0;
+            let mut rows = WrittenRows::new(journal, pairs.len());
+            for pair in pairs {
+                let written = hash.write_field(
+                    &pair[0],
+                    StringWrite::Copy(&pair[1]),
+                    FieldTtl::Set(None),
+                    journal,
+                );
+                added += i64::from(written.added);
+                rows.push(hash, written);
+            }
+            (added, previous, hash.state(), rows.finish())
         };
-        let mut added = 0;
-        for pair in args[2..].as_chunks::<2>().0.iter() {
-            added += i64::from(hash.set(pair[0].clone(), pair[1].clone(), None));
-        }
-        self.finish_hash_mutation(&args[1], previous);
-        self.record_hash_fields(
-            &args[1],
-            args[2..].as_chunks::<2>().0.iter().map(|pair| &pair[0]),
-            now,
-        );
+        let (added, previous, state, rows) =
+            match self.entries.get_mut(key).map(|entry| &mut entry.value) {
+                Some(Value::Hash(hash)) => write(hash),
+                Some(_) => return wrong_type(),
+                None => match self.collection_entry(key, now, || Value::Hash(Box::default())) {
+                    Value::Hash(hash) => write(hash),
+                    _ => unreachable!("a missing key is created as a hash"),
+                },
+            };
+        self.finish_hash_mutation_with(key, previous, state);
+        self.record_hash_rows(key, rows, now);
         if hmset {
             Resp::Simple("OK")
         } else {
@@ -464,24 +683,33 @@ impl Engine {
             _ => {}
         }
         let previous = self.hash_deadline(&args[1]);
+        let journal = self.capturing_changes();
         let Value::Hash(hash) =
-            self.collection_entry(&args[1], now, || Value::Hash(HashValue::default()))
+            self.collection_entry(&args[1], now, || Value::Hash(Box::default()))
         else {
             unreachable!("hash type validated");
         };
-        hash.set(args[2].clone(), args[3].clone(), None);
+        let written = hash.write_field(
+            &args[2],
+            StringWrite::Copy(&args[3]),
+            FieldTtl::Set(None),
+            journal,
+        );
+        let row = hash.written_row(written);
         self.finish_hash_mutation(&args[1], previous);
-        self.record_hash_fields(&args[1], std::iter::once(&args[2]), now);
+        self.record_hash_rows(&args[1], row.into_iter().collect(), now);
         Resp::Integer(1)
     }
 
-    fn hget(&mut self, args: &[Bytes], now: i64) -> Resp {
-        match self.hash_value(&args[1], now) {
-            Err(reply) => reply,
-            Ok(hash) => Resp::Bulk(
-                hash.and_then(|hash| hash.fields.get(&args[2]))
-                    .map(|field| field.value.clone()),
+    fn hget(value: Option<&Value>, args: &[Bytes]) -> Resp {
+        match value {
+            None => Resp::Bulk(None),
+            Some(Value::Hash(hash)) => Resp::Bulk(
+                hash.fields
+                    .get(&args[2])
+                    .map(|field| field.value.bytes().clone()),
             ),
+            Some(_) => wrong_type(),
         }
     }
 
@@ -493,7 +721,7 @@ impl Engine {
                 args[2..].iter().map(|field| {
                     Resp::Bulk(
                         hash.and_then(|hash| hash.fields.get(field))
-                            .map(|field| field.value.clone()),
+                            .map(|field| field.value.bytes().clone()),
                     )
                 }),
                 limit,
@@ -513,8 +741,8 @@ impl Engine {
         };
         for (field, value) in &hash.fields {
             let rows = usize::from(keys) + usize::from(values);
-            let bytes =
-                if keys { field.len() } else { 0 } + if values { value.value.len() } else { 0 };
+            let bytes = if keys { field.len() } else { 0 }
+                + if values { value.value.bytes().len() } else { 0 };
             if let Err(error) = budget.charge(rows, bytes) {
                 return error;
             }
@@ -526,7 +754,7 @@ impl Engine {
                     .map(|(field, value)| {
                         (
                             Resp::Bulk(Some(field.clone())),
-                            Resp::Bulk(Some(value.value.clone())),
+                            Resp::Bulk(Some(value.value.bytes().clone())),
                         )
                     })
                     .collect(),
@@ -538,7 +766,7 @@ impl Engine {
                 result.push(Resp::Bulk(Some(field.clone())));
             }
             if values {
-                result.push(Resp::Bulk(Some(value.value.clone())));
+                result.push(Resp::Bulk(Some(value.value.bytes().clone())));
             }
         }
         array(result)
@@ -559,10 +787,10 @@ impl Engine {
             unreachable!();
         };
         for field in &args[2..] {
-            if hash.remove(field) {
+            if let Some(owned) = hash.remove(field) {
                 count += 1;
                 if journal {
-                    removed.push(field.clone());
+                    removed.push(owned);
                 }
             }
         }
@@ -597,7 +825,7 @@ impl Engine {
             Err(reply) => reply,
             Ok(hash) => Resp::Integer(
                 hash.and_then(|hash| hash.fields.get(&args[2]))
-                    .map_or(0, |field| field.value.len() as i64),
+                    .map_or(0, |field| field.value.bytes().len() as i64),
             ),
         }
     }
@@ -606,28 +834,35 @@ impl Engine {
         let Some(increment) = integer(&args[3]) else {
             return integer_error();
         };
-        let (old, deadline) = match self.hash_value(&args[1], now) {
+        let old = match self.hash_value(&args[1], now) {
             Err(reply) => return reply,
             Ok(hash) => match hash.and_then(|hash| hash.fields.get(&args[2])) {
-                Some(field) => match integer(&field.value) {
-                    Some(value) => (value, field.expires_at),
+                Some(field) => match integer(field.value.bytes()) {
+                    Some(value) => value,
                     None => return error("ERR hash value is not an integer"),
                 },
-                None => (0, None),
+                None => 0,
             },
         };
         let Some(value) = old.checked_add(increment) else {
             return error("ERR increment or decrement would overflow");
         };
         let previous = self.hash_deadline(&args[1]);
+        let journal = self.capturing_changes();
         let Value::Hash(hash) =
-            self.collection_entry(&args[1], now, || Value::Hash(HashValue::default()))
+            self.collection_entry(&args[1], now, || Value::Hash(Box::default()))
         else {
             unreachable!();
         };
-        hash.set(args[2].clone(), Bytes::from(value.to_string()), deadline);
+        let written = hash.write_field(
+            &args[2],
+            StringWrite::Integer(value),
+            FieldTtl::Keep,
+            journal,
+        );
+        let row = hash.written_row(written);
         self.finish_hash_mutation(&args[1], previous);
-        self.record_hash_fields(&args[1], std::iter::once(&args[2]), now);
+        self.record_hash_rows(&args[1], row.into_iter().collect(), now);
         Resp::Integer(value)
     }
 
@@ -678,7 +913,7 @@ impl Engine {
             let value_bytes = if no_values {
                 0
             } else {
-                hash.fields[field].value.len()
+                hash.fields[field].value.bytes().len()
             };
             if let Err(error) =
                 budget.charge(if no_values { 1 } else { 2 }, field.len() + value_bytes)
@@ -693,7 +928,7 @@ impl Engine {
             } else {
                 let value = hash.fields.get(&field).expect("indexed hash field");
                 result.push(Resp::Bulk(Some(field)));
-                result.push(Resp::Bulk(Some(value.value.clone())));
+                result.push(Resp::Bulk(Some(value.value.bytes().clone())));
             }
         }
         array(vec![
@@ -737,8 +972,10 @@ impl Engine {
                     unreachable!();
                 };
                 for pair in fields.as_chunks::<2>().0.iter() {
-                    if hash.remove(&pair[0]) && journal {
-                        removed.push(pair[0].clone());
+                    if let Some(owned) = hash.remove(&pair[0])
+                        && journal
+                    {
+                        removed.push(owned);
                     }
                 }
             }
@@ -750,25 +987,26 @@ impl Engine {
                 });
             }
         } else {
+            let journal = self.capturing_changes();
             let Value::Hash(hash) =
-                self.collection_entry(&args[1], now, || Value::Hash(HashValue::default()))
+                self.collection_entry(&args[1], now, || Value::Hash(Box::default()))
             else {
                 unreachable!();
             };
-            for pair in fields.as_chunks::<2>().0.iter() {
-                let deadline = if keep_ttl {
-                    hash.fields.get(&pair[0]).and_then(|field| field.expires_at)
-                } else {
-                    expiration
-                };
-                hash.set(pair[0].clone(), pair[1].clone(), deadline);
+            let ttl = if keep_ttl {
+                FieldTtl::Keep
+            } else {
+                FieldTtl::Set(expiration)
+            };
+            let pairs = fields.as_chunks::<2>().0;
+            let mut rows = WrittenRows::new(journal, pairs.len());
+            for pair in pairs {
+                let written = hash.write_field(&pair[0], StringWrite::Copy(&pair[1]), ttl, journal);
+                rows.push(hash, written);
             }
+            let rows = rows.finish();
             self.finish_hash_mutation(&args[1], previous);
-            self.record_hash_fields(
-                &args[1],
-                fields.as_chunks::<2>().0.iter().map(|pair| &pair[0]),
-                now,
-            );
+            self.record_hash_rows(&args[1], rows, now);
         }
         Resp::Integer(1)
     }
@@ -856,16 +1094,19 @@ impl Engine {
             let status = match hash.fields.get(field) {
                 None => -2,
                 Some(value) if !condition.matches(value.expires_at, deadline) => 0,
-                Some(_) => {
-                    if deadline <= now {
-                        hash.remove(field);
-                    } else {
-                        hash.set_expiry(field, Some(deadline));
-                    }
+                Some(_) if deadline <= now => {
+                    let owned = hash.remove(field);
                     if journal {
-                        changed.push(field.clone());
+                        changed.extend(owned);
                     }
-                    if deadline <= now { 2 } else { 1 }
+                    2
+                }
+                Some(_) => {
+                    let position = hash.set_expiry(field, Some(deadline));
+                    if journal {
+                        changed.push(hash.random_fields[position].clone());
+                    }
+                    1
                 }
             };
             result.push(Resp::Integer(status));
@@ -951,9 +1192,9 @@ impl Engine {
                     expires_at: None, ..
                 }) => -1,
                 Some(_) => {
-                    hash.set_expiry(field, None);
+                    let position = hash.set_expiry(field, None);
                     if journal {
-                        changed.push(field.clone());
+                        changed.push(hash.random_fields[position].clone());
                     }
                     1
                 }
@@ -970,15 +1211,15 @@ impl Engine {
             return 0;
         }
         self.release_retained_hash(key, now);
-        let previous = self.hash_deadline(key);
         let hold = self.holding_expiry(key);
         let record = self.capturing_changes() && !hold;
         let mut expired = Vec::new();
         let mut removed = 0;
-        let owned = self.entries.get_key_value(key).map(|(key, _)| key.clone());
+        let mut previous = None;
         if let Some(entry) = self.entries.get_mut(key)
             && let Value::Hash(hash) = &mut entry.value
         {
+            previous = hash.next_expiry();
             while removed < limit && hash.next_expiry().is_some_and(|deadline| deadline <= now) {
                 let (_, field) = hash
                     .expirations
@@ -995,8 +1236,9 @@ impl Engine {
             }
         }
         if removed > 0 {
-            if hold && let Some(owned) = owned {
-                self.retained_hashes.insert(owned);
+            // The stored key, not the caller's frame-backed argument.
+            if hold && let Some((owned, _)) = self.entries.get_key_value(key) {
+                self.retained_hashes.insert(owned.clone());
             }
             self.finish_hash_mutation(key, previous);
             if !expired.is_empty() {
@@ -1072,7 +1314,7 @@ impl Engine {
     pub(super) fn replay_hash_set(
         &mut self,
         key: Bytes,
-        fields: Vec<(Bytes, Bytes, Option<i64>)>,
+        fields: Vec<FieldRow>,
         now: i64,
     ) -> io::Result<()> {
         if fields.is_empty()
@@ -1086,16 +1328,22 @@ impl Engine {
             return Err(invalid_journal());
         }
         let previous = self.hash_deadline(&key);
-        let Value::Hash(hash) =
-            self.collection_entry(&key, now, || Value::Hash(HashValue::default()))
+        let Value::Hash(hash) = self.collection_entry(&key, now, || Value::Hash(Box::default()))
         else {
             unreachable!();
         };
-        for (field, value, deadline) in fields {
+        // Rows may view a WAL, dump or replication frame: names of new fields
+        // and every value are placed into the hash's own storage.
+        for (field, value, deadline) in &fields {
             if deadline.is_some_and(|deadline| deadline <= now) {
-                hash.remove(&field);
+                hash.remove(field);
             } else {
-                hash.set(field, value, deadline);
+                hash.write_field(
+                    field,
+                    StringWrite::Copy(value),
+                    FieldTtl::Set(*deadline),
+                    false,
+                );
             }
         }
         self.finish_hash_mutation(&key, previous);
@@ -1121,7 +1369,7 @@ impl Engine {
             unreachable!();
         };
         for field in fields {
-            if !hash.remove(&field) {
+            if hash.remove(&field).is_none() {
                 return Err(invalid_journal());
             }
         }
@@ -1841,5 +2089,394 @@ mod tests {
             Resp::Map(vec![(value("b"), value("2"))])
         );
         assert!(recovered.take_batch().is_none());
+    }
+
+    #[test]
+    fn non_hash_reads_still_retain_and_then_release_due_fields() {
+        let mut engine = Engine::new();
+        engine.set_recording(true);
+        engine.set_migration_expiry_ranges(Some(&[(0, 16383)]));
+        run(&mut engine, 1000, &["HSET", "h", "keep", "1", "f", "2"]);
+        engine.take_batch();
+        run(
+            &mut engine,
+            1000,
+            &["HPEXPIRE", "h", "10", "FIELDS", "1", "f"],
+        );
+        engine.take_batch();
+        assert_eq!(run(&mut engine, 1010, &["EXISTS", "h"]), Resp::Integer(1));
+        assert!(engine.retained_hashes.contains(b"h".as_slice()));
+        assert!(engine.hash_expirations.is_empty());
+        assert!(
+            engine.take_batch().is_none(),
+            "held field expiry belongs to the source"
+        );
+        engine.set_migration_expiry_ranges(None);
+        assert_eq!(run(&mut engine, 1011, &["EXISTS", "h"]), Resp::Integer(1));
+        assert!(engine.retained_hashes.is_empty());
+        let released = engine.take_batch().expect("released field deletion");
+        assert!(released.mutations.iter().any(|mutation| matches!(
+            mutation,
+            Mutation::HashDelete { key, fields }
+                if key.as_ref() == b"h" && fields.as_slice() == [Bytes::from_static(b"f")]
+        )));
+        assert_eq!(run(&mut engine, 1011, &["HLEN", "h"]), Resp::Integer(1));
+    }
+
+    #[test]
+    fn string_overwrite_drops_the_replaced_hash_field_deadline() {
+        let mut engine = Engine::new();
+        run(&mut engine, 1000, &["HSET", "h", "f", "v"]);
+        run(
+            &mut engine,
+            1000,
+            &["HPEXPIRE", "h", "100", "FIELDS", "1", "f"],
+        );
+        assert_eq!(engine.hash_expirations.len(), 1);
+        assert_eq!(
+            run(&mut engine, 1000, &["SET", "h", "s"]),
+            Resp::Simple("OK")
+        );
+        assert!(engine.hash_expirations.is_empty());
+        engine.expire_hashes(2000, usize::MAX);
+        assert_eq!(run(&mut engine, 2000, &["GET", "h"]), value("s"));
+    }
+
+    #[test]
+    fn hset_journals_final_duplicate_rows_and_resets_the_earliest_field_deadline() {
+        fn row(field: &str, value: &str) -> (Bytes, Bytes, Option<i64>) {
+            (
+                Bytes::copy_from_slice(field.as_bytes()),
+                Bytes::copy_from_slice(value.as_bytes()),
+                None,
+            )
+        }
+        let mut source = Engine::new();
+        source.set_recording(true);
+        let mut recovered = Engine::new();
+        for args in [
+            vec!["HSET", "h", "f", "old", "g", "old"],
+            vec!["HPEXPIRE", "h", "100", "FIELDS", "1", "f"],
+            vec!["HPEXPIRE", "h", "200", "FIELDS", "1", "g"],
+            vec!["PEXPIRE", "h", "5000"],
+        ] {
+            persist(&mut source, &mut recovered, 1000, &args);
+        }
+        assert_eq!(
+            run(
+                &mut source,
+                1000,
+                &["HSET", "h", "f", "a", "n", "b", "f", "c"]
+            ),
+            Resp::Integer(1)
+        );
+        let batch = source.take_batch().expect("hash write batch");
+        let rows: Vec<_> = batch
+            .mutations
+            .iter()
+            .filter_map(|mutation| match mutation {
+                Mutation::HashSet { key, fields } if key.as_ref() == b"h" => Some(fields.clone()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(rows, [vec![row("f", "c"), row("n", "b"), row("f", "c")]]);
+        recovered.replay(batch).unwrap();
+        for engine in [&mut source, &mut recovered] {
+            assert_eq!(
+                engine.hash_expirations,
+                BTreeSet::from([(1200, Bytes::from_static(b"h"))])
+            );
+            assert_eq!(
+                run(
+                    engine,
+                    1000,
+                    &["HPEXPIRETIME", "h", "FIELDS", "3", "f", "g", "n"]
+                ),
+                ints(&[-1, 1200, -1])
+            );
+            assert_eq!(run(engine, 1000, &["PTTL", "h"]), Resp::Integer(5000));
+            engine.expire_hashes(1200, usize::MAX);
+            engine.take_batch();
+            assert_eq!(
+                run(engine, 1200, &["HMGET", "h", "f", "g", "n"]),
+                array(vec![value("c"), Resp::Bulk(None), value("b")])
+            );
+        }
+    }
+
+    #[test]
+    fn hset_over_held_field_expiry_still_releases_unwritten_retained_fields() {
+        let mut engine = Engine::new();
+        engine.set_recording(true);
+        engine.set_migration_expiry_ranges(Some(&[(0, 16383)]));
+        run(
+            &mut engine,
+            1000,
+            &["HSET", "h", "keep", "1", "a", "2", "b", "3"],
+        );
+        engine.take_batch();
+        run(
+            &mut engine,
+            1000,
+            &["HPEXPIRE", "h", "10", "FIELDS", "2", "a", "b"],
+        );
+        engine.take_batch();
+        assert_eq!(
+            run(&mut engine, 1010, &["HSET", "h", "a", "new"]),
+            Resp::Integer(1)
+        );
+        engine.take_batch();
+        let visible = array(vec![value("1"), value("new"), Resp::Bulk(None)]);
+        assert_eq!(
+            run(&mut engine, 1010, &["HMGET", "h", "keep", "a", "b"]),
+            visible
+        );
+        engine.set_migration_expiry_ranges(None);
+        assert_eq!(run(&mut engine, 1011, &["EXISTS", "h"]), Resp::Integer(1));
+        let released = engine.take_batch().expect("released field deletion");
+        let deleted: Vec<_> = released
+            .mutations
+            .iter()
+            .filter_map(|mutation| match mutation {
+                Mutation::HashDelete { key, fields } if key.as_ref() == b"h" => {
+                    Some(fields.clone())
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(deleted, [vec![Bytes::from_static(b"b")]]);
+        assert_eq!(
+            run(&mut engine, 1011, &["HMGET", "h", "keep", "a", "b"]),
+            visible
+        );
+    }
+
+    #[test]
+    fn hash_writes_never_change_outstanding_views_or_snapshots() {
+        let mut engine = Engine::new();
+        run(&mut engine, 0, &["HSET", "h", "f", "1234", "g", "x"]);
+        let snapshot = engine
+            .snapshot_batches(0)
+            .collect::<io::Result<Vec<_>>>()
+            .unwrap();
+        let writes: [(&[&str], &str); 6] = [
+            (&["HSET", "h", "f", "5678"], "5678"),
+            (&["HINCRBY", "h", "f", "1"], "5679"),
+            (
+                &["HSETEX", "h", "KEEPTTL", "FIELDS", "1", "f", "9999"],
+                "9999",
+            ),
+            (&["HINCRBYFLOAT", "h", "f", "0.5"], "9999.5"),
+            (&["HSET", "h", "f", "abcdefgh", "f", "zzzzzz"], "zzzzzz"),
+            (
+                &["HSETEX", "h", "PX", "100", "FIELDS", "1", "f", "qqqqqq"],
+                "qqqqqq",
+            ),
+        ];
+        for (write, after) in writes {
+            let views: Vec<_> = [
+                &["HGET", "h", "f"][..],
+                &["HMGET", "h", "f", "g"],
+                &["HGETALL", "h"],
+                &["HVALS", "h"],
+                &["HSCAN", "h", "0"],
+                &["HGETEX", "h", "FIELDS", "1", "f"],
+            ]
+            .into_iter()
+            .map(|read| {
+                let reply = run(&mut engine, 0, read);
+                let before = format!("{reply:?}");
+                (reply, before)
+            })
+            .collect();
+            run(&mut engine, 0, write);
+            for (reply, before) in &views {
+                assert_eq!(&format!("{reply:?}"), before, "{write:?}");
+            }
+            assert_eq!(run(&mut engine, 0, &["HGET", "h", "f"]), value(after));
+        }
+        let mut restored = Engine::new();
+        for batch in snapshot {
+            restored.replay(batch).unwrap();
+        }
+        assert_eq!(
+            run(&mut restored, 0, &["HMGET", "h", "f", "g"]),
+            array(vec![value("1234"), value("x")])
+        );
+    }
+
+    #[test]
+    fn retained_hash_journal_rows_keep_each_resolved_value() {
+        let mut source = Engine::new();
+        source.set_recording(true);
+        let mut batches = Vec::new();
+        for command in [
+            &["HSET", "h", "f", "aaaa"][..],
+            &["HSET", "h", "f", "bbbb", "g", "1"],
+            &["HINCRBY", "h", "g", "9"],
+            &["HINCRBY", "h", "g", "-20"],
+            &[
+                "HSETEX", "h", "PX", "500", "FIELDS", "3", "f", "cc", "n", "x", "f", "dd",
+            ],
+            &[
+                "HSETEX", "h", "KEEPTTL", "FIELDS", "2", "f", "ee", "f", "ff",
+            ],
+            &["HINCRBYFLOAT", "h", "g", "0.25"],
+            &["HPERSIST", "h", "FIELDS", "1", "f"],
+            &["HSETNX", "h", "m", "mm"],
+            &["HSET", "h", "f", "gg"],
+        ] {
+            run(&mut source, 100, command);
+            // Retained batches model journal rows not yet persisted.
+            batches.extend(source.take_batch());
+        }
+        let rows: Vec<_> = batches
+            .iter()
+            .flat_map(|batch| &batch.mutations)
+            .filter_map(|mutation| match mutation {
+                Mutation::HashSet { key, fields } if key.as_ref() == b"h" => Some(fields),
+                _ => None,
+            })
+            .flatten()
+            .cloned()
+            .collect();
+        let row = |field: &'static str, value: &'static str, ttl: Option<i64>| {
+            (
+                Bytes::from_static(field.as_bytes()),
+                Bytes::from_static(value.as_bytes()),
+                ttl,
+            )
+        };
+        assert_eq!(
+            rows,
+            vec![
+                row("f", "aaaa", None),
+                row("f", "bbbb", None),
+                row("g", "1", None),
+                row("g", "10", None),
+                row("g", "-10", None),
+                row("f", "dd", Some(600)),
+                row("n", "x", Some(600)),
+                row("f", "dd", Some(600)),
+                row("f", "ff", Some(600)),
+                row("f", "ff", Some(600)),
+                row("g", "-9.75", None),
+                row("f", "ff", None),
+                row("m", "mm", None),
+                row("f", "gg", None),
+            ]
+        );
+        let mut recovered = Engine::new();
+        for batch in batches {
+            recovered.replay(batch).unwrap();
+        }
+        assert_eq!(
+            run(&mut recovered, 100, &["HMGET", "h", "f", "g", "n", "m"]),
+            array(vec![value("gg"), value("-9.75"), value("x"), value("mm")])
+        );
+        assert_eq!(
+            run(
+                &mut recovered,
+                100,
+                &["HPEXPIRETIME", "h", "FIELDS", "3", "f", "g", "n"]
+            ),
+            ints(&[-1, -1, 600])
+        );
+    }
+
+    #[test]
+    fn held_hash_fields_are_rewritten_or_restored_with_their_own_values() {
+        // A local write over a held field starts from the written value alone.
+        let mut engine = Engine::new();
+        engine.set_migration_expiry_ranges(Some(&[(0, 16383)]));
+        run(
+            &mut engine,
+            1000,
+            &["HSET", "h", "keep", "1", "a", "7", "b", "old", "c", "vc"],
+        );
+        run(
+            &mut engine,
+            1000,
+            &["HPEXPIRE", "h", "10", "FIELDS", "3", "a", "b", "c"],
+        );
+        assert_eq!(
+            run(&mut engine, 1010, &["HINCRBY", "h", "a", "5"]),
+            Resp::Integer(5)
+        );
+        assert_eq!(
+            run(
+                &mut engine,
+                1010,
+                &["HSETEX", "h", "KEEPTTL", "FIELDS", "1", "b", "new"]
+            ),
+            Resp::Integer(1)
+        );
+        assert_eq!(
+            run(&mut engine, 1010, &["HMGET", "h", "a", "b", "c"]),
+            array(vec![value("5"), value("new"), Resp::Bulk(None)])
+        );
+        assert_eq!(
+            run(
+                &mut engine,
+                1010,
+                &["HPEXPIRETIME", "h", "FIELDS", "3", "a", "b", "c"]
+            ),
+            ints(&[-1, -1, -2])
+        );
+
+        // A follower holds due fields until source history resolves them.
+        fn replicate(source: &mut Engine, follower: &mut Engine, now: i64, args: &[&str]) {
+            run(source, now, args);
+            let batch = source.take_batch().expect("source history");
+            follower.set_replication_replay(true);
+            follower.replay(batch).unwrap();
+            follower.set_replication_replay(false);
+        }
+        let mut source = Engine::new();
+        source.set_recording(true);
+        let mut follower = Engine::new();
+        follower.set_replica_mode(true);
+        let (source, follower) = (&mut source, &mut follower);
+        replicate(
+            source,
+            follower,
+            1000,
+            &["HSET", "h", "keep", "1", "a", "va", "b", "vb"],
+        );
+        replicate(
+            source,
+            follower,
+            1000,
+            &["HPEXPIRE", "h", "10", "FIELDS", "2", "a", "b"],
+        );
+        let held = array(vec![value("1"), Resp::Bulk(None), Resp::Bulk(None)]);
+        assert_eq!(run(follower, 1010, &["HMGET", "h", "keep", "a", "b"]), held);
+        assert!(follower.retained_hashes.contains(b"h".as_slice()));
+        // Source history from before the deadline restores both held fields.
+        replicate(source, follower, 1005, &["HSET", "h", "a", "new"]);
+        assert_eq!(
+            run(follower, 1009, &["HMGET", "h", "keep", "a", "b"]),
+            array(vec![value("1"), value("new"), value("vb")])
+        );
+        assert_eq!(
+            run(follower, 1010, &["HMGET", "h", "keep", "a", "b"]),
+            array(vec![value("1"), value("new"), Resp::Bulk(None)])
+        );
+        assert_eq!(
+            run(
+                follower,
+                1010,
+                &["HPEXPIRETIME", "h", "FIELDS", "2", "a", "b"]
+            ),
+            ints(&[-1, -2])
+        );
+        // The source's resolved expiry deletes the held field.
+        replicate(source, follower, 1010, &["HLEN", "h"]);
+        assert!(follower.retained_hashes.is_empty());
+        assert_eq!(run(follower, 1010, &["HLEN", "h"]), Resp::Integer(2));
+        assert_eq!(
+            run(follower, 1009, &["HMGET", "h", "keep", "a", "b"]),
+            array(vec![value("1"), value("new"), Resp::Bulk(None)])
+        );
     }
 }

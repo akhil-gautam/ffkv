@@ -19,7 +19,7 @@ use tokio::{
 
 use crate::{engine::ReadyKey, session::ClientSession};
 use crate::{
-    engine::{BlockingKind, BlockingPop, BlockingStream, Engine, Execution, Routing},
+    engine::{BlockingKind, BlockingPop, BlockingStream, BoundCommand, Engine, Execution, Routing},
     executor::Atomic,
     persistence::Persistence,
     protocol::Resp,
@@ -358,7 +358,7 @@ impl Waiters {
                     && waiter
                         .stream
                         .as_ref()
-                        .is_none_or(|stream| Engine::is_dataset_write(&stream.args))
+                        .is_none_or(|stream| BoundCommand::bind(&stream.args).is_dataset_write())
                 {
                     continue;
                 }
@@ -529,6 +529,7 @@ impl Waiters {
         engine: &mut Engine,
         request: CommandRequest,
         persistence: &Persistence,
+        cpu_observed: bool,
     ) -> io::Result<()> {
         // No reply or subsequent read can expose mutations until WAL commit.
         // A commit failure is fatal: the owner stops processing and closes clients.
@@ -545,18 +546,13 @@ impl Waiters {
         engine.set_recording(persistence.recording_for(&request.args));
         let database = engine.database();
         engine.set_ready_tracking(!self.clients.is_empty());
-        let cpu = crate::server_commands::thread_cpu_time();
-        let execution = engine.execute(&request.args)?;
+        let cpu = ClientSession::cpu_window(request.session.as_deref(), cpu_observed);
+        let mut command = BoundCommand::bind(&request.args);
+        let execution = engine.execute(&mut command)?;
         if let Some(session) = &request.session {
-            session.cpu_ns.fetch_add(
-                crate::server_commands::thread_cpu_time()
-                    .saturating_sub(cpu)
-                    .as_nanos()
-                    .min(u64::MAX as u128) as u64,
-                Ordering::Relaxed,
-            );
+            session.charge_cpu(cpu);
         }
-        persistence.note_reads(&request.args, request.session.as_deref());
+        persistence.note_reads(&command, request.session.as_deref());
         persistence.commit(engine).await?;
         let ready = engine.take_ready_keys();
         match execution {
@@ -627,8 +623,8 @@ pub async fn run(
     if has_wal {
         persistence
             .configure(
-                config.aof_enabled,
-                config.durability,
+                Some(config.aof_enabled),
+                Some(config.durability),
                 engine.snapshot_batches(Engine::now()),
             )
             .await?;
@@ -677,10 +673,17 @@ pub async fn run(
     state.metrics.sample_process();
     let compaction = Arc::new(AtomicBool::new(false));
     let mut last_compaction = Instant::now();
-    let (pool, mut workers) = Pool::start(engine, shard_count, persistence.clone());
+    let (pool, mut workers) = Pool::start(engine, shard_count, persistence.clone(), state.clone());
+    // Leaving this function without `close` (error or panic) stops the pool
+    // even while connections still hold it.
+    let _lifetime = pool.lifetime();
     if let Some(runtime) = state.admin_runtime.get() {
         runtime.attach_pool(&pool);
     }
+    state
+        .pool
+        .set(Arc::downgrade(&pool))
+        .map_err(|_| io::Error::other("shard pool already attached"))?;
     let mut pending = JoinSet::new();
     let mut waiters = Waiters {
         registry: Some(state.client_registry.clone()),
@@ -702,21 +705,23 @@ pub async fn run(
                     waiters.expire(Instant::now());
                     match request {
                     Request::Command(request) => {
-                        let scripting = matches!(Engine::routing(&request.args, shard_count), Routing::Scripting);
-                        if !scripting && state.is_replica() && Engine::is_dataset_write(&request.args) {
+                        let mut command = BoundCommand::bind(&request.args);
+                        let routing = command.routing(shard_count);
+                        let scripting = matches!(routing, Routing::Scripting);
+                        if !scripting && state.is_replica() && command.is_dataset_write() {
                             let _ = request.reply.send(Resp::Error("READONLY this development replica accepts no dataset writes".into()));
-                        } else if !scripting && state.is_replica() && !state.replica_ready() && !Engine::is_control(&request.args) {
+                        } else if !scripting && state.is_replica() && !state.replica_ready() && !command.is_control() {
                             let _ = request.reply.send(Resp::Error("LOADING replica initial synchronization is not complete".into()));
-                        } else if let Some(reply) = (!scripting).then(|| state.admission().reject_pressure(&request.args)).flatten() {
+                        } else if let Some(reply) = (!scripting).then(|| state.admission().reject_pressure(&command)).flatten() {
                             let _ = request.reply.send(reply);
                         } else {
-                            match Engine::routing(&request.args, shard_count) {
+                            match routing {
                         _ if request.args.first().is_some_and(|name| {
                             name.eq_ignore_ascii_case(b"PUBLISH") || name.eq_ignore_ascii_case(b"SPUBLISH") || name.eq_ignore_ascii_case(b"PUBSUB")
                         }) => {
-                            let allowed = Engine::validate(&request.args).and_then(|()| {
+                            let allowed = command.check().and_then(|()| {
                                 request.user.as_deref().map_or(Ok(()), |user| {
-                                    Engine::authorize(&request.args, user)
+                                    command.authorize(user, None)
                                 })
                             });
                             let reply = match allowed {
@@ -749,16 +754,23 @@ pub async fn run(
                             } else { let _ = request.reply.send(Resp::Error("ERR compaction requires --storage hybrid".into())); }
                         }
                         Routing::Local {shard, ready} => {
-                            let keys = Engine::accessed_keys(&request.args);
+                            let keys = command.accessed_keys();
                             let database = request.session.as_ref().map_or(0, |session| session.database());
                             if state.cluster.get().is_some() || keys.iter().any(|key|waiters.keys.contains_key(&(database, key.clone()))) {
-                                coordinated(&mut waiters, &pool, &persistence, keys, ready, request, Some(&state)).await?;
+                                coordinated(&mut waiters, &pool, &persistence, keys.into_vec(), ready, request, Some(&state)).await?;
                             } else {
                                 // Admission happens before the next registration can
                                 // acquire the write barrier: no lost push/wait race.
-                                let guard = pool.admit().await?;
-                                let pool = pool.clone();
-                                pending.spawn(async move { pool.execute(shard, request, guard).await });
+                                let admission = pool.admit().await?;
+                                if let Err(stopped) = pool.submit(shard, request, admission, &mut pending) {
+                                    // A closed queue means that actor returned or unwound;
+                                    // report its cause rather than the symptom.
+                                    return Err(match workers.join_next().await {
+                                        Some(Ok(Err(cause))) => cause,
+                                        Some(Err(join)) => io::Error::other(join),
+                                        _ => stopped,
+                                    });
+                                }
                             }
                         }
                         Routing::Coordinated {keys, ready} => {
@@ -869,6 +881,8 @@ pub async fn run(
                         native_wake_pending=false;
                     }
                 let mut paused = pool.pause().await?;
+                // Lowers a stale waiter flag once blocked clients are gone.
+                paused.publish_waiters(!waiters.clients.is_empty());
                 if let Some(batch) = paused.reap_search(Engine::now(), persistence.capturing())? {
                     persistence.commit_batch(&batch).await?;
                 }
@@ -910,10 +924,13 @@ pub async fn run(
             },
         }
     }
-    // Drain accepted commands, then close shard channels before final fsync.
+    // Finish compaction and full-queue hand-offs, then drain every queued
+    // command, inline lease and deferred commit before the final fsync, even
+    // while a connection still holds the pool. Workers and the supervisor end.
     while let Some(result) = pending.join_next().await {
         result.map_err(io::Error::other)??;
     }
+    pool.close().await?;
     drop(pool);
     while let Some(result) = workers.join_next().await {
         result.map_err(io::Error::other)??;
@@ -992,22 +1009,21 @@ async fn atomic(
         asking: cluster_client.is_some_and(|client| client.asking),
     };
     if state.cluster.get().is_some() {
-        let writes = |args: &[Bytes]| {
-            if matches!(Engine::routing(args, 1), Routing::Scripting) {
-                scripts.invocation_context(args).map_or_else(
-                    |_| Engine::is_dataset_write(args),
-                    |context| !context.readonly,
-                )
+        let writes = |command: &BoundCommand<'_>| {
+            if matches!(command.routing(1), Routing::Scripting) {
+                scripts
+                    .invocation_context(command.args())
+                    .map_or_else(|_| command.is_dataset_write(), |context| !context.readonly)
             } else {
-                Engine::is_dataset_write(args)
+                command.is_dataset_write()
             }
         };
         let (mut keys, write, migrating) = match &request {
             Request::Command(request) => {
-                let write = writes(&request.args);
+                let command = BoundCommand::bind(&request.args);
                 (
-                    Engine::accessed_keys(&request.args),
-                    write,
+                    command.accessed_keys().into_vec(),
+                    writes(&command),
                     request.args[0].eq_ignore_ascii_case(b"MIGRATE"),
                 )
             }
@@ -1020,8 +1036,9 @@ async fn atomic(
                 let mut keys = Vec::new();
                 let mut write = false;
                 for args in commands {
-                    keys.extend(Engine::accessed_keys(args));
-                    write |= writes(args);
+                    let command = BoundCommand::bind(args);
+                    keys.extend(command.accessed_keys());
+                    write |= writes(&command);
                 }
                 for (_, invocation) in modules {
                     keys.extend_from_slice(invocation.keys());
@@ -1089,12 +1106,10 @@ async fn atomic(
             executor.set_visible_slots(visible_slots);
             let revision = scripts.function_revision();
             executor.track_ready(!waiters.clients.is_empty());
-            let reply = if matches!(Engine::routing(&request.args, 1), Routing::Scripting) {
-                executor.script(&request.args, scripts)?
-            } else if matches!(Engine::routing(&request.args, 1), Routing::Maintenance) {
-                executor.server_command(&request.args, state).await?
-            } else {
-                executor.data(&request.args)?
+            let reply = match BoundCommand::bind(&request.args).routing(1) {
+                Routing::Scripting => executor.script(&request.args, scripts)?,
+                Routing::Maintenance => executor.server_command(&request.args, state).await?,
+                _ => executor.data(&request.args)?,
             };
             executor.functions_changed(revision, scripts);
             let (batch, ready, publications, swapped) = executor.finish(persistence.capturing());
@@ -1248,7 +1263,7 @@ async fn coordinated(
         let client = request.cluster_client.as_mut().unwrap_or(&mut fallback);
         if let Err(response) = crate::native_runtime::admit_cluster_paused(
             &keys,
-            Engine::is_dataset_write(&request.args),
+            BoundCommand::bind(&request.args).is_dataset_write(),
             false,
             request.args[0].eq_ignore_ascii_case(b"MIGRATE"),
             client,
@@ -1269,8 +1284,14 @@ async fn coordinated(
     }
     let keys = waiters.wake_keys(keys.into_iter().map(|key| (database, key)).collect());
     let mut engine = paused.take_database_keys(&keys, persistence.capturing());
-    waiters.execute(&mut engine, request, persistence).await?;
+    let cpu_observed = state.is_none_or(State::cpu_observed);
+    waiters
+        .execute(&mut engine, request, persistence, cpu_observed)
+        .await?;
     paused.restore(engine);
+    // A new registration is visible to inline commands before any cell is
+    // released; they then escalate to this coordinator's exact key check.
+    paused.publish_waiters(!waiters.clients.is_empty());
     paused.resume()
 }
 
@@ -1283,15 +1304,16 @@ mod tests {
         let mut engine = Engine::new();
         engine.switch_database(1);
         engine
-            .execute(&[
+            .execute(&mut crate::engine::BoundCommand::bind(&[
                 Bytes::from_static(b"RPUSH"),
                 Bytes::from_static(b"jobs"),
                 Bytes::from_static(b"moved"),
-            ])
+            ]))
             .unwrap();
         engine.switch_database(0);
         let persistence = Arc::new(Persistence::new(None));
-        let (pool, mut workers) = Pool::start(engine, 2, persistence.clone());
+        let server = Arc::new(State::new(0, 2, false));
+        let (pool, mut workers) = Pool::start(engine, 2, persistence.clone(), server);
         let mut waiters = Waiters::default();
         let session = Arc::new(ClientSession::new(303));
         let (reply, blocked) = oneshot::channel();
@@ -1372,6 +1394,7 @@ mod tests {
                     None,
                 ),
                 &Persistence::new(None),
+                true,
             )
             .await
             .unwrap();
@@ -1398,6 +1421,7 @@ mod tests {
                     Some(session),
                 ),
                 &Persistence::new(None),
+                true,
             )
             .await
             .unwrap();
@@ -1651,7 +1675,8 @@ mod tests {
         .unwrap()
         .unwrap();
         let persistence = Arc::new(Persistence::new(Some(wal)));
-        let (pool, mut workers) = Pool::start(Engine::new(), 4, persistence.clone());
+        let server = Arc::new(State::new(0, 4, false));
+        let (pool, mut workers) = Pool::start(Engine::new(), 4, persistence.clone(), server);
         let mut waiters = Waiters::default();
         let mut keys = Vec::new();
         for shard in 0..4 {
@@ -1673,11 +1698,12 @@ mod tests {
                 Bytes::from_static(b"LEFT"),
                 Bytes::from_static(b"0"),
             ];
+            let accessed = BoundCommand::bind(&args).accessed_keys().into_vec();
             coordinated(
                 &mut waiters,
                 &pool,
                 &persistence,
-                Engine::accessed_keys(&args),
+                accessed,
                 Some(keys[index + 1].clone()),
                 CommandRequest::client(args, reply, None, crate::protocol::Version::Resp2, None),
                 None,
@@ -1692,11 +1718,12 @@ mod tests {
             keys[3].clone(),
             Bytes::from_static(b"0"),
         ];
+        let accessed = BoundCommand::bind(&args).accessed_keys().into_vec();
         coordinated(
             &mut waiters,
             &pool,
             &persistence,
-            Engine::accessed_keys(&args),
+            accessed,
             None,
             CommandRequest::client(args, reply, None, crate::protocol::Version::Resp2, None),
             None,
@@ -1710,11 +1737,12 @@ mod tests {
             Bytes::from_static(b"retained"),
             Bytes::from_static(b"job"),
         ];
+        let accessed = BoundCommand::bind(&args).accessed_keys().into_vec();
         coordinated(
             &mut waiters,
             &pool,
             &persistence,
-            Engine::accessed_keys(&args),
+            accessed,
             Some(keys[0].clone()),
             CommandRequest::client(args, reply, None, crate::protocol::Version::Resp2, None),
             None,
@@ -1758,7 +1786,8 @@ mod tests {
                         Bytes::from_static(b"0"),
                         Bytes::from_static(b"-1"),
                     ];
-                    let Execution::Reply(Resp::Array(Some(values))) = recovered.execute(&args)?
+                    let Execution::Reply(Resp::Array(Some(values))) =
+                        recovered.execute(&mut crate::engine::BoundCommand::bind(&args))?
                     else {
                         panic!("recovered move source must remain a list");
                     };
@@ -1798,12 +1827,14 @@ mod tests {
             Bytes::from_static(b"-1"),
         ];
         assert!(
-            matches!(recovered.execute(&args).unwrap(), Execution::Reply(Resp::Array(Some(values))) if values == vec![Resp::Bulk(Some(Bytes::from_static(b"retained")))])
+            matches!(recovered.execute(&mut crate::engine::BoundCommand::bind(&args)).unwrap(), Execution::Reply(Resp::Array(Some(values))) if values == vec![Resp::Bulk(Some(Bytes::from_static(b"retained")))])
         );
         for key in &keys[1..] {
             let args = vec![Bytes::from_static(b"EXISTS"), key.clone()];
             assert!(matches!(
-                recovered.execute(&args).unwrap(),
+                recovered
+                    .execute(&mut crate::engine::BoundCommand::bind(&args))
+                    .unwrap(),
                 Execution::Reply(Resp::Integer(0))
             ));
         }
@@ -1926,6 +1957,147 @@ mod tests {
             Resp::Bulk(Some(Bytes::from_static(b"second")))
         );
     }
+
+    fn rpush(value: &'static [u8]) -> Vec<Bytes> {
+        vec![
+            Bytes::from_static(b"RPUSH"),
+            Bytes::from_static(b"jobs"),
+            Bytes::from_static(value),
+        ]
+    }
+
+    fn inline(args: &[Bytes]) -> crate::request::SingleKey<'_> {
+        crate::request::SingleKey {
+            command: BoundCommand::bind(args),
+            origin: crate::request::Origin::Client(crate::protocol::Version::Resp2),
+            user: None,
+            session: None,
+            write_permit: None,
+            cluster_client: None,
+        }
+    }
+
+    fn blpop(reply: oneshot::Sender<Resp>) -> CommandRequest {
+        CommandRequest::client(
+            vec![
+                Bytes::from_static(b"BLPOP"),
+                Bytes::from_static(b"jobs"),
+                Bytes::from_static(b"0"),
+            ],
+            reply,
+            None,
+            crate::protocol::Version::Resp2,
+            None,
+        )
+    }
+
+    fn popped(value: &'static [u8]) -> Resp {
+        Resp::Array(Some(vec![
+            Resp::Bulk(Some(Bytes::from_static(b"jobs"))),
+            Resp::Bulk(Some(Bytes::from_static(value))),
+        ]))
+    }
+
+    #[tokio::test]
+    async fn inline_pushes_never_lose_a_wake_to_a_concurrent_blocking_registration() {
+        use crate::sharding::Ran;
+        let persistence = Arc::new(Persistence::new(None));
+        let state = Arc::new(State::new(0, 2, false));
+        let (pool, mut workers) = Pool::start(Engine::new(), 2, persistence.clone(), state.clone());
+        let mut waiters = Waiters::default();
+        let keys = vec![Bytes::from_static(b"jobs")];
+        let shard = pool
+            .inline_shard(&BoundCommand::bind(&rpush(b"probe")), &state)
+            .unwrap();
+
+        // A registering pause queues behind an inline lease: the push commits
+        // first and the blocking pop consumes it instead of registering.
+        let lease = pool.lease(shard).await.unwrap();
+        let (reply, mut first) = oneshot::channel();
+        {
+            let registration = coordinated(
+                &mut waiters,
+                &pool,
+                &persistence,
+                keys.clone(),
+                None,
+                blpop(reply),
+                None,
+            );
+            tokio::pin!(registration);
+            assert!(
+                tokio::time::timeout(Duration::from_millis(20), registration.as_mut())
+                    .await
+                    .is_err()
+            );
+            assert!(matches!(
+                lease.run(inline(&rpush(b"first")), &state).unwrap(),
+                Ran::Done(Resp::Integer(1))
+            ));
+            registration.await.unwrap();
+        }
+        assert_eq!(first.try_recv().unwrap(), popped(b"first"));
+        assert!(waiters.clients.is_empty());
+
+        // A waiter registered by a pause makes later inline pushes fall back,
+        // untouched, to the coordinator's exact key route, which wakes it.
+        let (reply, mut second) = oneshot::channel();
+        coordinated(
+            &mut waiters,
+            &pool,
+            &persistence,
+            keys.clone(),
+            None,
+            blpop(reply),
+            None,
+        )
+        .await
+        .unwrap();
+        assert_eq!(waiters.clients.len(), 1);
+        let second_push = rpush(b"second");
+        let Ran::Escalate(command) = pool
+            .lease(shard)
+            .await
+            .unwrap()
+            .run(inline(&second_push), &state)
+            .unwrap()
+        else {
+            panic!("an inline push ran while a client was blocked");
+        };
+        assert!(matches!(
+            second.try_recv(),
+            Err(oneshot::error::TryRecvError::Empty)
+        ));
+        assert!(waiters.keys.contains_key(&(0, Bytes::from_static(b"jobs"))));
+        let (reply, mut pushed) = oneshot::channel();
+        coordinated(
+            &mut waiters,
+            &pool,
+            &persistence,
+            command.command.accessed_keys().into_vec(),
+            Some(Bytes::from_static(b"jobs")),
+            command.into_request(reply),
+            None,
+        )
+        .await
+        .unwrap();
+        assert_eq!(pushed.try_recv().unwrap(), Resp::Integer(1));
+        assert_eq!(second.try_recv().unwrap(), popped(b"second"));
+
+        // That pause published that no client is blocked any more.
+        assert!(matches!(
+            pool.lease(shard)
+                .await
+                .unwrap()
+                .run(inline(&rpush(b"third")), &state)
+                .unwrap(),
+            Ran::Done(Resp::Integer(1))
+        ));
+        drop(pool);
+        while let Some(result) = workers.join_next().await {
+            result.unwrap().unwrap();
+        }
+    }
 }
 
 #[cfg(test)]
@@ -1955,6 +2127,7 @@ mod stream_tests {
                     None,
                 ),
                 &Persistence::new(None),
+                true,
             )
             .await
             .unwrap();
@@ -2095,10 +2268,14 @@ mod stream_tests {
         // Simulate one atomic command's committed final state: the same group
         // name exists again, but it must not inherit the old group's waiters.
         engine
-            .execute(&args(&["XGROUP", "DESTROY", "s", "g"]))
+            .execute(&mut crate::engine::BoundCommand::bind(&args(&[
+                "XGROUP", "DESTROY", "s", "g",
+            ])))
             .unwrap();
         engine
-            .execute(&args(&["XGROUP", "CREATE", "s", "g", "0"]))
+            .execute(&mut crate::engine::BoundCommand::bind(&args(&[
+                "XGROUP", "CREATE", "s", "g", "0",
+            ])))
             .unwrap();
         let persistence = Persistence::new(None);
         persistence.commit(&mut engine).await.unwrap();
@@ -2121,9 +2298,19 @@ mod stream_tests {
         )
         .await;
         engine
-            .execute(&args(&["XADD", "s", "1-0", "f", "intermediate"]))
+            .execute(&mut crate::engine::BoundCommand::bind(&args(&[
+                "XADD",
+                "s",
+                "1-0",
+                "f",
+                "intermediate",
+            ])))
             .unwrap();
-        engine.execute(&args(&["XDEL", "s", "1-0"])).unwrap();
+        engine
+            .execute(&mut crate::engine::BoundCommand::bind(&args(&[
+                "XDEL", "s", "1-0",
+            ])))
+            .unwrap();
         let persistence = Persistence::new(None);
         persistence.commit(&mut engine).await.unwrap();
         waiters
@@ -2154,17 +2341,18 @@ mod stream_tests {
             .unwrap();
         for key in [&key0, &key1] {
             engine
-                .execute(&[
+                .execute(&mut crate::engine::BoundCommand::bind(&[
                     Bytes::from_static(b"XGROUP"),
                     Bytes::from_static(b"CREATE"),
                     key.clone(),
                     Bytes::from_static(b"g"),
                     Bytes::from_static(b"0"),
                     Bytes::from_static(b"MKSTREAM"),
-                ])
+                ]))
                 .unwrap();
         }
-        let (pool, mut workers) = Pool::start(engine, 2, persistence.clone());
+        let server = Arc::new(State::new(0, 2, false));
+        let (pool, mut workers) = Pool::start(engine, 2, persistence.clone(), server);
         let mut waiters = Waiters::default();
         let (reply, mut read) = oneshot::channel();
         let read_args = vec![

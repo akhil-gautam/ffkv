@@ -4,6 +4,7 @@ use std::io;
 use std::ops::Bound::{self, Excluded, Included, Unbounded};
 
 use bytes::Bytes;
+use smallvec::SmallVec;
 
 use super::scan::{ScanIndex, parse_scan, scan_entries, stable_hash};
 use super::{
@@ -111,6 +112,60 @@ impl SortedSetValue {
         self.scan.remove(&(stable_hash(&stored), stored.clone()));
         Some(stored)
     }
+
+    /// Apply one ZADD pair to the current state, so a repeated member observes
+    /// every earlier pair of the same command. A new member owns a fresh copy
+    /// of its bytes; an existing member keeps its stored key.
+    fn add_pair(&mut self, member: &Bytes, score: Score, options: &AddOptions) -> PairEffect {
+        let (stored, old) = match self.members.get_key_value(member) {
+            Some((stored, old)) => (stored, *old),
+            None if options.xx => return PairEffect::Rejected,
+            None => {
+                let member = Bytes::copy_from_slice(member);
+                self.insert(member.clone(), score);
+                return PairEffect::Written {
+                    member,
+                    added: true,
+                };
+            }
+        };
+        if options.nx || (options.gt && score <= old) || (options.lt && score >= old) {
+            return PairEffect::Rejected;
+        }
+        if old == score {
+            return PairEffect::Unchanged;
+        }
+        let stored = stored.clone();
+        PairEffect::Written {
+            member: self.rescore(stored, old, score),
+            added: false,
+        }
+    }
+
+    /// Move an existing member to a new score. Lex and scan rows carry no
+    /// score, so only the map value and the ordered row change.
+    fn rescore(&mut self, stored: Bytes, old: Score, score: Score) -> Bytes {
+        *self
+            .members
+            .get_mut(&stored)
+            .expect("rescored member is indexed") = score;
+        let (_, member) = self
+            .ordered
+            .take(&(old, stored))
+            .expect("every member has an ordered row");
+        self.ordered.insert((score, member.clone()));
+        member
+    }
+}
+
+/// The effect of one ZADD pair on its sorted set.
+enum PairEffect {
+    /// NX, XX, GT or LT rejected the pair; it does not become the INCR result.
+    Rejected,
+    /// Accepted at the member's current score: an INCR result, not a CH change.
+    Unchanged,
+    /// Inserted (`added`) or rescored; `member` is the set's owned key.
+    Written { member: Bytes, added: bool },
 }
 
 pub(super) static COMMANDS: &[CommandSpec] = &[
@@ -476,7 +531,7 @@ impl Engine {
         now: i64,
     ) -> Result<Option<&SortedSetValue>, Resp> {
         match self.value(key, now) {
-            Some(Value::SortedSet(value)) => Ok(Some(value)),
+            Some(Value::SortedSet(value)) => Ok(Some(&**value)),
             Some(_) => Err(wrong_type()),
             None => Ok(None),
         }
@@ -515,7 +570,9 @@ impl Engine {
         if options.incr && args.len() - position != 2 {
             return syntax_error();
         }
-        let mut scores = Vec::with_capacity((args.len() - position) / 2);
+        // Validate every score before any key or member work; common short
+        // commands stage their parsed scores inline.
+        let mut scores = SmallVec::<[Score; 8]>::with_capacity((args.len() - position) / 2);
         for pair in args[position..].as_chunks::<2>().0.iter() {
             let Some(score) = parse_score(&pair[0]) else {
                 return score_error();
@@ -557,14 +614,20 @@ impl Engine {
         if let Err(reply) = super::ReplyBudget::new(self.reply_limit).response(&preview) {
             return reply;
         }
-        let existing = match self.sorted_set(key, now) {
-            Ok(value) => value,
-            Err(reply) => return reply,
+        let journaling = self.journal_enabled;
+        // The same expiry discard as `sorted_set`, then one mutable outer lookup
+        // reused by every pair.
+        self.discard_expired(key, now);
+        let existing = match self.entries.get_mut(key).map(|entry| &mut entry.value) {
+            Some(Value::SortedSet(value)) => Some(&mut **value),
+            Some(_) => return wrong_type(),
+            None => None,
         };
         // INCR is restricted to one pair; resolve its arithmetic before creating
         // the key or changing either index. Conditional no-ops precede arithmetic.
         let incremented = if options.incr {
             let old = existing
+                .as_ref()
                 .and_then(|value| value.members.get(&pairs[1]))
                 .copied();
             if (options.nx && old.is_some()) || (options.xx && old.is_none()) {
@@ -577,44 +640,37 @@ impl Engine {
         } else {
             None
         };
+        let value = match existing {
+            Some(value) => value,
+            // XX never inserts, so a missing key is never created (INCR replied above).
+            None if options.xx => return Resp::Integer(0),
+            // Without XX the first pair always inserts into a missing key, so
+            // creating it here is exactly where the first insertion created it.
+            None => match self.collection_entry(key, now, || Value::SortedSet(Box::default())) {
+                Value::SortedSet(value) => &mut **value,
+                _ => unreachable!(),
+            },
+        };
         let mut added = 0;
         let mut changed = 0;
         let mut result = None;
-        let journaling = self.journal_enabled;
         let mut updates = Vec::new();
-        for (pair, score) in pairs.as_chunks::<2>().0.iter().zip(scores) {
-            let score = incremented.unwrap_or(*score);
-            let member = &pair[1];
-            let previous = match self.entries.get(key).map(|entry| &entry.value) {
-                Some(Value::SortedSet(value)) => value.members.get_key_value(member),
-                _ => None,
-            };
-            let old = previous.map(|(_, score)| *score);
-            if (options.nx && old.is_some())
-                || (options.xx && old.is_none())
-                || old
-                    .is_some_and(|old| (options.gt && score <= old) || (options.lt && score >= old))
-            {
-                continue;
-            }
-            result = Some(score);
-            if old == Some(score) {
-                continue;
-            }
-            let member = previous.map_or_else(
-                || Bytes::copy_from_slice(member),
-                |(stored, _)| stored.clone(),
-            );
-            let Value::SortedSet(value) =
-                self.collection_entry(key, now, || Value::SortedSet(SortedSetValue::default()))
-            else {
-                unreachable!()
-            };
-            value.insert(member.clone(), score);
-            added += i64::from(old.is_none());
-            changed += 1;
-            if journaling {
-                updates.push((member, score.0));
+        for (pair, &score) in pairs.as_chunks::<2>().0.iter().zip(scores) {
+            let score = incremented.unwrap_or(score);
+            match value.add_pair(&pair[1], score, &options) {
+                PairEffect::Rejected => {}
+                PairEffect::Unchanged => result = Some(score),
+                PairEffect::Written {
+                    member,
+                    added: inserted,
+                } => {
+                    result = Some(score);
+                    added += i64::from(inserted);
+                    changed += 1;
+                    if journaling {
+                        updates.push((member, score.0));
+                    }
+                }
             }
         }
         if !updates.is_empty() {
@@ -909,7 +965,7 @@ impl Engine {
             return Err(invalid_journal());
         }
         let Value::SortedSet(value) =
-            self.collection_entry(&key, now, || Value::SortedSet(SortedSetValue::default()))
+            self.collection_entry(&key, now, || Value::SortedSet(Box::default()))
         else {
             return Err(invalid_journal());
         };
@@ -988,6 +1044,93 @@ mod tests {
             run(&mut engine, &["ZADD", "z", "INCR", "0.5", "a"]),
             Resp::Double(1.75)
         );
+    }
+
+    /// Drain one command's journal, check its sorted-set rows, and replay them.
+    fn replay_zadd_rows(source: &mut Engine, recovered: &mut Engine, expected: &[(&str, f64)]) {
+        let batch = source.take_batch().expect("journaled ZADD");
+        let Some(Mutation::SortedSetAdd { entries, .. }) = batch.mutations.last() else {
+            panic!("expected a sorted-set add row");
+        };
+        let expected: Vec<_> = expected
+            .iter()
+            .map(|(member, score)| (Bytes::copy_from_slice(member.as_bytes()), *score))
+            .collect();
+        assert_eq!(entries, &expected);
+        recovered.replay(batch).unwrap();
+    }
+
+    #[test]
+    fn zadd_validates_every_score_then_applies_repeated_members_in_order() {
+        let mut engine = Engine::new();
+        engine.set_recording(true);
+        let mut recovered = Engine::new();
+        for no_op in [
+            vec!["ZADD", "z", "1", "a", "nan", "b"],
+            vec!["ZADD", "z", "XX", "CH", "1", "a"],
+        ] {
+            let expected = if no_op.contains(&"nan") {
+                score_error()
+            } else {
+                Resp::Integer(0)
+            };
+            assert_eq!(run(&mut engine, &no_op), expected);
+            assert_eq!(run(&mut engine, &["EXISTS", "z"]), Resp::Integer(0));
+            assert!(engine.take_batch().is_none());
+        }
+        assert_eq!(
+            run(
+                &mut engine,
+                &["ZADD", "z", "CH", "1", "a", "2", "a", "2", "a", "1", "b"]
+            ),
+            Resp::Integer(3)
+        );
+        replay_zadd_rows(
+            &mut engine,
+            &mut recovered,
+            &[("a", 1.0), ("a", 2.0), ("b", 1.0)],
+        );
+        assert_eq!(
+            run(&mut engine, &["ZADD", "z", "3", "b", "4", "b", "3", "b"]),
+            Resp::Integer(0)
+        );
+        replay_zadd_rows(
+            &mut engine,
+            &mut recovered,
+            &[("b", 3.0), ("b", 4.0), ("b", 3.0)],
+        );
+        assert_eq!(
+            run(
+                &mut engine,
+                &["ZADD", "z", "GT", "CH", "0", "a", "5", "a", "3", "a"]
+            ),
+            Resp::Integer(1)
+        );
+        replay_zadd_rows(&mut engine, &mut recovered, &[("a", 5.0)]);
+        assert_eq!(
+            run(
+                &mut engine,
+                &["ZADD", "z", "NX", "9", "a", "8", "c", "7", "c"]
+            ),
+            Resp::Integer(1)
+        );
+        replay_zadd_rows(&mut engine, &mut recovered, &[("c", 8.0)]);
+        assert_eq!(
+            run(&mut engine, &["ZADD", "z", "XX", "INCR", "1", "missing"]),
+            Resp::Bulk(None)
+        );
+        assert!(engine.take_batch().is_none());
+        let expected = Resp::Scored(vec![
+            (Bytes::from_static(b"b"), 3.0),
+            (Bytes::from_static(b"a"), 5.0),
+            (Bytes::from_static(b"c"), 8.0),
+        ]);
+        for engine in [&mut engine, &mut recovered] {
+            assert_eq!(
+                run(engine, &["ZRANGE", "z", "0", "-1", "WITHSCORES"]),
+                expected
+            );
+        }
     }
 
     #[test]

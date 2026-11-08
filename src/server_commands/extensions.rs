@@ -5,7 +5,10 @@
 //! Commands run synchronously on the paused atomic dispatcher; all key access
 //! and Call operations go through its normal ACL, journal and replication path.
 mod abi;
-use crate::{engine::Engine, protocol::Resp};
+use crate::{
+    engine::{BoundCommand, Engine},
+    protocol::Resp,
+};
 use abi::{Command, CommandFn, Context};
 use bytes::Bytes;
 use libloading::Library;
@@ -133,7 +136,7 @@ impl Invocation {
         let command = &self.module.commands[self.command_index];
         let readonly = !self.is_write();
         let mut guarded = |args: &[Bytes]| {
-            if readonly && Engine::is_dataset_write(args) {
+            if readonly && BoundCommand::bind(args).is_dataset_write() {
                 return err("write command called from a readonly module command");
             }
             call(args)

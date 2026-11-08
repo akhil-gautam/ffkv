@@ -1,0 +1,92 @@
+{
+ "schema": 1,
+ "prototype": "io_uring S1 (per-frontend ring, AsyncFd reaper, batched submit, copying UringTcp), opt-in FFKV_IO_URING=1, sha256 a385bdd924e275c7fa281109843757fca6198c2cf0ffa2b3b4d648bbfb543aab",
+ "memtier_get4096_p16_c32_ops_per_s": {
+  "uring_flusher": [
+   723761.5,
+   752290.9
+  ],
+  "epoll_same_binary": [
+   776459.0,
+   766703.8,
+   714646.9,
+   765175.8
+  ],
+  "uring_no_flusher": [
+   684127.8,
+   690256.2
+  ],
+  "dragonfly_io_uring": [
+   744341.6,
+   727544.8
+  ]
+ },
+ "memtier_syscalls_per_3s": {
+  "uring": {
+   "io_uring_enter": [
+    357175,
+    400057
+   ],
+   "epoll_pwait": [
+    613487,
+    695822
+   ]
+  },
+  "epoll": {
+   "sendto": [
+    1418400,
+    1403818
+   ],
+   "recvfrom": [
+    1423095,
+    1407493
+   ],
+   "epoll_pwait": [
+    352383,
+    359340
+   ]
+  }
+ },
+ "dragonfly_mode_check_ops_per_s": {
+  "io_uring": [
+   796083.1,
+   780879.6
+  ],
+  "force_epoll": [
+   806632.1,
+   802695.1
+  ],
+  "ffkv_epoll": [
+   791217.6,
+   784211.9
+  ]
+ },
+ "redis_benchmark_screen_median_ops_per_s": {
+  "get-256 P1": [
+   567000.0,
+   426100.0
+  ],
+  "get-256 P16": [
+   2948600.0,
+   2356100.0
+  ],
+  "get-4096 P1": [
+   528000.0,
+   394200.0
+  ],
+  "get-4096 P16": [
+   1647300.0,
+   1180700.0
+  ],
+  "incr P1": [
+   569200.0,
+   432300.0
+  ],
+  "incr P16": [
+   2989200.0,
+   2390100.0
+  ],
+  "_columns": "[epoll wave7b, io_uring prototype]"
+ },
+ "decision": "Rejected and removed: syscalls fell ~68% under memtier but throughput dropped 4-10% there and 20-28% under redis-benchmark (extra copies, extra epoll wakeups per round, one send in flight). Dragonfly itself is not faster with io_uring than with --force_epoll on this VM."
+}

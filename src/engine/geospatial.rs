@@ -1,6 +1,6 @@
 //! Geospatial indexes are ordinary sorted sets with interleaved coordinate scores.
 //! Wire/coordinate reference: Redis 7.2 geohash format (BSD); distance is haversine.
-use super::sorted_sets::{SortedSetValue, parse_float};
+use super::sorted_sets::parse_float;
 use super::{
     CommandSpec, Engine, Mutation, Resp, Value, array, bounded_replies, error, integer,
     integer_error, syntax_error,
@@ -429,11 +429,7 @@ impl Engine {
                 continue;
             }
             let Value::SortedSet(value) =
-                self.collection_entry(
-                    &args[1],
-                    now,
-                    || Value::SortedSet(SortedSetValue::default()),
-                )
+                self.collection_entry(&args[1], now, || Value::SortedSet(Box::default()))
             else {
                 unreachable!()
             };
@@ -586,9 +582,9 @@ impl Engine {
             if !hits.is_empty() {
                 let mut updates = Vec::new();
                 let journaling = self.journal_enabled;
-                let Value::SortedSet(value) = self.collection_entry(&destination, now, || {
-                    Value::SortedSet(SortedSetValue::default())
-                }) else {
+                let Value::SortedSet(value) =
+                    self.collection_entry(&destination, now, || Value::SortedSet(Box::default()))
+                else {
                     unreachable!()
                 };
                 for hit in hits {

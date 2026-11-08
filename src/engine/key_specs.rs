@@ -1,24 +1,100 @@
 //! Compiled Redis 8.10 key specifications. No metadata DOM or heap work on ingress.
 use super::{Resp, error, integer};
 use bytes::Bytes;
-use std::{iter::StepBy, ops::Range};
+
+/// Bounded arithmetic progression: `len` items starting at `first`, `step` apart.
+/// Invariant: when `len > 0`, `first + (len - 1) * step` is a valid element `< end`
+/// of the original `first..end`, so neither advancing nor computing the last item
+/// can overflow.
+#[derive(Clone, Copy)]
+struct Span {
+    first: usize,
+    step: usize,
+    len: usize,
+}
+impl Span {
+    #[inline]
+    fn new(first: usize, end: usize, step: usize) -> Self {
+        assert!(step != 0, "assertion failed: step != 0");
+        let len = if first >= end {
+            0
+        } else if step == 1 {
+            end - first
+        } else {
+            (end - first - 1) / step + 1
+        };
+        Self { first, step, len }
+    }
+    #[inline]
+    fn next(&mut self) -> Option<usize> {
+        if self.len == 0 {
+            return None;
+        }
+        let position = self.first;
+        self.len -= 1;
+        if self.len != 0 {
+            // Another item remains, so it is in bounds.
+            self.first += self.step;
+        }
+        Some(position)
+    }
+    #[inline]
+    fn next_back(&mut self) -> Option<usize> {
+        if self.len == 0 {
+            return None;
+        }
+        self.len -= 1;
+        // Bounded by the last in-range element; never exceeds the original end.
+        Some(if self.step == 1 {
+            self.first + self.len
+        } else {
+            self.first + self.len * self.step
+        })
+    }
+}
 
 #[derive(Clone)]
 pub(super) struct KeyPositions {
-    ranges: [StepBy<Range<usize>>; 3],
+    spans: [Span; 3],
     front: usize,
     back: usize,
     remaining: usize,
 }
 impl KeyPositions {
     pub(super) fn new(spans: [(usize, usize, usize); 3]) -> Self {
-        let ranges = spans.map(|(first, end, step)| (first..end).step_by(step));
-        let remaining = ranges.iter().map(ExactSizeIterator::len).sum();
+        let spans = spans.map(|(first, end, step)| Span::new(first, end, step));
+        let remaining = spans.iter().map(|span| span.len).sum();
         Self {
-            ranges,
+            spans,
             front: 0,
             back: 3,
             remaining,
+        }
+    }
+    /// Exactly the positions [`Self::new`] yields for `[(position, position + 1,
+    /// step), (0, 0, 1), (0, 0, 1)]` with any nonzero `step`, built without the
+    /// general span arithmetic. Excluding the empty spans keeps iteration from
+    /// scanning them; `position + 1` is never computed, so any `usize` works.
+    #[inline]
+    pub(super) fn single(position: usize) -> Self {
+        let empty = Span {
+            first: 0,
+            step: 1,
+            len: 0,
+        };
+        Self {
+            spans: [
+                Span {
+                    first: position,
+                    step: 1,
+                    len: 1,
+                },
+                empty,
+                empty,
+            ],
+            front: 0,
+            back: 1,
+            remaining: 1,
         }
     }
 }
@@ -26,7 +102,7 @@ impl Iterator for KeyPositions {
     type Item = usize;
     fn next(&mut self) -> Option<usize> {
         while self.front < self.back {
-            if let Some(position) = self.ranges[self.front].next() {
+            if let Some(position) = self.spans[self.front].next() {
                 self.remaining -= 1;
                 return Some(position);
             }
@@ -41,7 +117,7 @@ impl Iterator for KeyPositions {
 impl DoubleEndedIterator for KeyPositions {
     fn next_back(&mut self) -> Option<usize> {
         while self.front < self.back {
-            if let Some(position) = self.ranges[self.back - 1].next_back() {
+            if let Some(position) = self.spans[self.back - 1].next_back() {
                 self.remaining -= 1;
                 return Some(position);
             }
@@ -61,16 +137,57 @@ enum Find {
     Count { step: usize },
 }
 #[derive(Clone, Copy)]
-struct Spec {
+pub(super) struct Spec {
     begin: Begin,
     find: Find,
 }
 
-pub(super) fn compiled(name: &str, args: &[Bytes]) -> Option<Result<Option<KeyPositions>, Resp>> {
-    if matches!(
+/// Key specifications attached to a command definition.
+#[derive(Clone, Copy)]
+pub(super) enum KeyTable {
+    /// Static definition outside the registry: resolve the table by name.
+    Unindexed,
+    /// Resolved once when the immutable registry was built.
+    Indexed(Option<&'static [Spec]>),
+}
+
+/// Scripts and functions validate their key count before their key table.
+fn counts_script_keys(name: &str) -> bool {
+    matches!(
         name,
         "eval" | "eval_ro" | "evalsha" | "evalsha_ro" | "fcall" | "fcall_ro"
-    ) {
+    )
+}
+
+/// The one argument a registered command's compiled key specification names,
+/// when that specification is a single static index with a zero-length range.
+/// [`compiled`] then adds no checks and `resolve` cannot fail: it yields
+/// exactly `KeyPositions::single(position)` when `position < args.len()` and no
+/// positions otherwise, like any optional range past the end. Everything else,
+/// including unindexed and fallback metadata, has no fixed position.
+pub(super) fn fixed_position(name: &str, keys: KeyTable) -> Option<usize> {
+    if counts_script_keys(name) {
+        return None;
+    }
+    match keys {
+        KeyTable::Indexed(Some(
+            [
+                Spec {
+                    begin: Begin::Index(position),
+                    find: Find::Range { last: 0, step },
+                },
+            ],
+        )) if *step != 0 => Some(*position),
+        _ => None,
+    }
+}
+
+pub(super) fn compiled(
+    name: &str,
+    keys: KeyTable,
+    args: &[Bytes],
+) -> Option<Result<Option<KeyPositions>, Resp>> {
+    if counts_script_keys(name) {
         let count = match args.get(2).and_then(|value| integer(value)) {
             Some(count) if count < 0 => {
                 return Some(Err(error("ERR Number of keys can't be negative")));
@@ -86,7 +203,16 @@ pub(super) fn compiled(name: &str, args: &[Bytes]) -> Option<Result<Option<KeyPo
             )));
         }
     }
-    let specs: &[Spec] = match name {
+    let specs = match keys {
+        KeyTable::Indexed(specs) => specs,
+        KeyTable::Unindexed => table(name),
+    }?;
+    Some(resolve(specs, args))
+}
+
+/// Static Redis key specifications; evaluated once per registered command.
+pub(super) fn table(name: &str) -> Option<&'static [Spec]> {
+    let specs: &'static [Spec] = match name {
         "acl" => &[],
         "acl|cat" => &[],
         "acl|deluser" => &[],
@@ -1308,7 +1434,7 @@ pub(super) fn compiled(name: &str, args: &[Bytes]) -> Option<Result<Option<KeyPo
         ],
         _ => return None,
     };
-    Some(resolve(specs, args))
+    Some(specs)
 }
 fn resolve(specs: &[Spec], args: &[Bytes]) -> Result<Option<KeyPositions>, Resp> {
     let invalid = || error("ERR Invalid arguments specified for command");
@@ -1359,4 +1485,147 @@ fn resolve(specs: &[Spec], args: &[Bytes]) -> Result<Option<KeyPositions>, Resp>
     }
     let positions = KeyPositions::new(spans);
     Ok((positions.len() != 0).then_some(positions))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::KeyPositions;
+
+    type Spans = [(usize, usize, usize); 3];
+
+    fn reference(spans: Spans) -> impl DoubleEndedIterator<Item = usize> + ExactSizeIterator {
+        let [a, b, c] = spans.map(|(first, end, step)| (first..end).step_by(step));
+        // Chain is not ExactSize; collect into a fixed-order Vec iterator for comparison.
+        a.chain(b).chain(c).collect::<Vec<_>>().into_iter()
+    }
+
+    /// Drives both iterators with a deterministic front/back pattern and compares
+    /// every item and every intermediate length, including after exhaustion.
+    fn differential(spans: Spans, pattern: u64) {
+        let mut expected = reference(spans);
+        let mut actual = KeyPositions::new(spans);
+        assert_eq!(actual.len(), expected.len(), "{spans:?}");
+        let mut bits = pattern;
+        for _ in 0..64 {
+            let back = bits & 1 == 1;
+            bits = bits.rotate_right(1);
+            let clone = actual.clone();
+            let (want, got) = if back {
+                (expected.next_back(), actual.next_back())
+            } else {
+                (expected.next(), actual.next())
+            };
+            assert_eq!(got, want, "{spans:?} pattern {pattern:#x}");
+            assert_eq!(actual.len(), expected.len(), "{spans:?}");
+            assert_eq!(actual.size_hint(), (actual.len(), Some(actual.len())));
+            assert_eq!(clone.len(), actual.len() + usize::from(want.is_some()));
+        }
+        assert_eq!(actual.next(), None);
+        assert_eq!(actual.next_back(), None);
+        assert_eq!(actual.len(), 0);
+    }
+
+    #[test]
+    fn key_positions_match_chained_step_by_for_mixed_directions() {
+        const M: usize = usize::MAX;
+        let singles: &[(usize, usize, usize)] = &[
+            (0, 0, 1),
+            (5, 5, 3),
+            (7, 3, 1),
+            (7, 3, 2),
+            (1, 2, 1),
+            (1, 2, 100),
+            (1, 9, 1),
+            (1, 9, 2),
+            (1, 10, 3),
+            (2, 11, 3),
+            (0, 4, 7),
+            (M - 1, M, 1),
+            (M - 3, M, 1),
+            (M - 3, M, 2),
+            (M - 4, M, 3),
+            (M - 1, M, M),
+            (0, M, M),
+            (0, M, M - 1),
+            (0, M, M / 2),
+            (1, M, M / 2 + 1),
+            (M - 10, M, 4),
+            (M, M, 1),
+            (M, 0, 5),
+        ];
+        let patterns = [
+            0,
+            u64::MAX,
+            0xaaaa_aaaa_aaaa_aaaa,
+            0x5555_5555_5555_5555,
+            0xcccc_cccc_cccc_cccc,
+            0x0f0f_0f0f_0f0f_0f0f,
+            0x9e37_79b9_7f4a_7c15,
+        ];
+        for &a in singles {
+            for &b in singles {
+                for &c in &[(0, 0, 1), (3, 8, 2), (M - 2, M, 1), (9, 2, 4)] {
+                    for &pattern in &patterns {
+                        differential([a, b, c], pattern);
+                        differential([c, a, b], pattern);
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn key_positions_report_exact_lengths_near_usize_max() {
+        let max = usize::MAX;
+        assert_eq!(
+            KeyPositions::new([(0, max, 1), (0, 0, 1), (0, 0, 1)]).len(),
+            max
+        );
+        let mut positions = KeyPositions::new([(0, max, 1), (0, 0, 1), (0, 0, 1)]);
+        assert_eq!(positions.next_back(), Some(max - 1));
+        assert_eq!(positions.next(), Some(0));
+        assert_eq!(positions.len(), max - 2);
+        let mut wide = KeyPositions::new([(0, max, max / 2), (0, 0, 1), (0, 0, 1)]);
+        assert_eq!(wide.len(), 3);
+        assert_eq!(wide.next_back(), Some(max / 2 * 2));
+        assert_eq!(wide.next(), Some(0));
+        assert_eq!(wide.next(), Some(max / 2));
+        assert_eq!(wide.next_back(), None);
+    }
+
+    #[test]
+    #[should_panic]
+    fn key_positions_reject_zero_step_like_step_by() {
+        let _ = KeyPositions::new([(0, 4, 0), (0, 0, 1), (0, 0, 1)]);
+    }
+
+    #[test]
+    #[should_panic]
+    fn key_positions_reject_zero_step_on_empty_span_like_step_by() {
+        let _ = KeyPositions::new([(0, 0, 1), (5, 5, 0), (0, 0, 1)]);
+    }
+
+    #[test]
+    fn single_position_matches_its_general_span_in_both_directions() {
+        const M: usize = usize::MAX;
+        for position in [0, 1, 5, M - 1] {
+            for step in [1, 3, M] {
+                for back in [false, true] {
+                    let spans = [(position, position + 1, step), (0, 0, 1), (0, 0, 1)];
+                    let mut general = KeyPositions::new(spans);
+                    let mut single = KeyPositions::single(position);
+                    for _ in 0..3 {
+                        assert_eq!(single.len(), general.len());
+                        assert!(single.clone().eq(general.clone()));
+                        let (got, want) = if back {
+                            (single.next_back(), general.next_back())
+                        } else {
+                            (single.next(), general.next())
+                        };
+                        assert_eq!(got, want, "{position} {step} {back}");
+                    }
+                }
+            }
+        }
+    }
 }

@@ -3240,22 +3240,17 @@ pub(super) fn dispatch(engine: &Engine, args: &[Bytes]) -> Resp {
         {
             return descriptors::module_keys(spec, command, with_flags, engine.reply_limit);
         }
-        if let Err(reply) = Engine::validate(command) {
+        let mut bound = super::BoundCommand::bind(command);
+        if let Err(reply) = bound.check() {
             return reply;
         }
-        let Some(spec) = super::effective_spec(command) else {
-            return error("ERR Invalid command specified");
-        };
-        let positions = match spec.key_positions(command) {
-            Ok(Some(positions)) => positions,
-            Ok(None) => {
-                return if spec.flags.contains(&"no_mandatory_keys") {
-                    array(Vec::new())
-                } else {
-                    error("ERR The command has no key arguments")
-                };
-            }
-            Err(reply) => return reply,
+        let spec = bound.spec().expect("checked command is registered");
+        let Some(positions) = bound.access_positions() else {
+            return if spec.flags.contains(&"no_mandatory_keys") {
+                array(Vec::new())
+            } else {
+                error("ERR The command has no key arguments")
+            };
         };
         return super::bounded_replies(
             positions.map(|position| {

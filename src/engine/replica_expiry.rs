@@ -47,17 +47,18 @@ impl Engine {
         self.retained_hashes.remove(key);
         self.refresh_hash_deadline(key, previous);
     }
-    pub(super) fn prepare_replay_args(&mut self, args: &[Bytes]) {
-        if !self.replication_replay {
-            return;
+    /// Only replication replay restores held images before a command; every
+    /// other command pays the inlined flag test, not a call.
+    #[inline]
+    pub(super) fn prepare_replay_args(&mut self, command: &super::BoundCommand<'_>) {
+        if self.replication_replay {
+            self.restore_replayed_args(command);
         }
-        let Some(spec) = super::effective_spec(args) else {
-            return;
-        };
-        if let Ok(Some(positions)) = spec.key_positions(args) {
-            for position in positions {
-                self.restore_held_key(&args[position]);
-            }
+    }
+    fn restore_replayed_args(&mut self, command: &super::BoundCommand<'_>) {
+        let args = command.args();
+        for position in command.access_positions().into_iter().flatten() {
+            self.restore_held_key(&args[position]);
         }
     }
     pub(super) fn prepare_replay_mutation(&mut self, mutation: &Mutation) {
@@ -91,7 +92,7 @@ impl Engine {
     /// A new authoritative value supersedes the retained source image. The DEL
     /// must precede partial creation effects, including clock-zero cluster imports.
     pub(super) fn resolve_held_write(&mut self, key: &Bytes, now: i64) {
-        if self.held_entries.remove(key).is_some() {
+        if !self.held_entries.is_empty() && self.held_entries.remove(key).is_some() {
             self.retained_hashes.remove(key);
             self.record(now, || Mutation::Delete { key: key.clone() });
         }

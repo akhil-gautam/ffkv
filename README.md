@@ -10,6 +10,88 @@ native leased jobs, a React management console and self-hosted deployment.
 
 Brand assets: [wordmark](apps/docs/public/brand/ffkv-wordmark.svg) · [symbol](apps/docs/public/brand/ffkv-mark.svg).
 
+## Performance: ffkv vs Dragonfly vs Redis
+
+On a matched benchmark, ffkv's throughput beat Dragonfly in **all 27 cases**:
+nine workloads × three client profiles. It beat Redis in **18 of 27**. Every
+ffkv run was faster than every Dragonfly run in the same case.
+
+Commands per second are the median of two runs per engine, all memory-only:
+
+**1 client, no pipelining**
+
+| Workload | ffkv | Dragonfly | Redis | ffkv vs Dragonfly | ffkv vs Redis |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| GET 256 B | 21,547 | 13,227 | 22,415 | **1.63×** | 0.96× |
+| SET 256 B | 21,388 | 13,114 | 21,929 | **1.63×** | 0.98× |
+| GET 4 KiB | 20,669 | 12,443 | 21,002 | **1.66×** | 0.98× |
+| SET 4 KiB | 20,419 | 12,512 | 20,954 | **1.63×** | 0.97× |
+| INCR | 21,468 | 13,342 | 22,365 | **1.61×** | 0.96× |
+| HGET | 22,019 | 13,193 | 22,379 | **1.67×** | 0.98× |
+| HSET | 21,747 | 13,014 | 22,039 | **1.67×** | 0.99× |
+| ZADD | 21,283 | 12,870 | 21,380 | **1.65×** | 0.995× |
+| ZRANGE (10 members) | 21,025 | 12,862 | 21,856 | **1.63×** | 0.96× |
+
+**32 clients, no pipelining**
+
+| Workload | ffkv | Dragonfly | Redis | ffkv vs Dragonfly | ffkv vs Redis |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| GET 256 B | 597,096 | 338,504 | 358,598 | **1.76×** | 1.67× |
+| SET 256 B | 578,372 | 339,073 | 339,196 | **1.71×** | 1.71× |
+| GET 4 KiB | 546,983 | 301,687 | 282,093 | **1.81×** | 1.94× |
+| SET 4 KiB | 525,455 | 305,616 | 282,125 | **1.72×** | 1.86× |
+| INCR | 595,150 | 338,542 | 359,802 | **1.76×** | 1.65× |
+| HGET | 583,295 | 338,542 | 338,542 | **1.72×** | 1.72× |
+| HSET | 559,829 | 338,542 | 338,354 | **1.65×** | 1.65× |
+| ZADD | 432,670 | 320,660 | 237,959 | **1.35×** | 1.82× |
+| ZRANGE (10 members) | 554,188 | 321,313 | 321,805 | **1.72×** | 1.72× |
+
+**32 clients, pipeline 16**
+
+| Workload | ffkv | Dragonfly | Redis | ffkv vs Dragonfly | ffkv vs Redis |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| GET 256 B | 2,941,042 | 2,603,375 | 2,082,643 | **1.13×** | 1.41× |
+| SET 256 B | 2,634,198 | 2,427,828 | 1,736,991 | **1.09×** | 1.52× |
+| GET 4 KiB | 1,840,583 | 1,155,995 | 795,787 | **1.59×** | 2.31× |
+| SET 4 KiB | 1,641,558 | 1,097,966 | 494,416 | **1.50×** | 3.32× |
+| INCR | 3,076,196 | 2,971,252 | 2,079,936 | **1.04×** | 1.48× |
+| HGET | 2,826,854 | 2,599,985 | 1,689,266 | **1.09×** | 1.67× |
+| HSET | 2,628,055 | 2,447,099 | 1,514,368 | **1.07×** | 1.74× |
+| ZADD | 2,398,487 | 1,835,926 | 548,041 | **1.31×** | 4.38× |
+| ZRANGE (10 members) | 1,786,067 | 1,485,170 | 1,094,335 | **1.20×** | 1.63× |
+
+**Setup**
+
+- **Machine:** Apple M4 MacBook Pro (10 cores, 16 GiB). Every server and client ran inside one ARM64 Linux VM (OrbStack).
+- **CPUs:** servers used CPUs 0–3, and the load generator used separate CPUs 4–7.
+- **Versions:** ffkv default release build with 64 shards; Dragonfly 2.0.2 with 4 proactor threads; Redis 8.2.1.
+- **Load generator:** the same compiled `redis-benchmark` 8.2.1 for every engine. Run order alternated between engines, and warmup and calibration were excluded from the results.
+- **Checks:** fixtures were validated before and after each measurement. All 162 trials passed.
+
+**Limits**
+
+- The Mac ran on battery with Low Power Mode on, and other applications were left running.
+- Two runs per case are not a significance test.
+- Redis is single-threaded. With one client and no pipelining it stays 0.5–4% ahead of ffkv.
+- Results are memory-only. Dragonfly has no equivalent to `everysec` or `strict` append-only durability, so those modes aren't compared here.
+- A cross-check with memtier and Dragonfly's own client had ffkv ahead in 41 of 42 cases. The exception was memtier GET 4 KiB at pipeline 16, at 0.89×. Later repeats of that case alternated with Dragonfly by a few percent.
+
+**Reproduce:** follow the
+[benchmark guide](apps/docs/src/content/docs/contributing/benchmarks.md), then run:
+
+```sh
+python3 benchmarks/redis_compare.py --engines ffkv redis dragonfly --modes memory \
+  --binary target/release/ffkv --redis-binary redis-server --benchmark-binary redis-benchmark \
+  --dragonfly-binary dragonfly --dragonfly-threads 4 --ffkv-shards 64 \
+  --server-cpus 0-3 --client-cpus 4-7 --repetitions 2 --target-seconds 5 --json comparison.json
+```
+
+**Raw evidence** (in `benchmarks/results/dragonfly-vs-ffkv-2026-11-03/`):
+
+- [`wave7b-balanced.json`](benchmarks/results/dragonfly-vs-ffkv-2026-11-03/wave7b-balanced.json): every trial.
+- [`wave7b-analysis.json`](benchmarks/results/dragonfly-vs-ffkv-2026-11-03/wave7b-analysis.json): the analysis.
+- [`wave7b-cross-generator-analysis.json`](benchmarks/results/dragonfly-vs-ffkv-2026-11-03/wave7b-cross-generator-analysis.json): the memtier and Dragonfly-client cross-check.
+
 ## Documentation site
 
 **Public handbook: [ffkv.pages.dev](https://ffkv.pages.dev/).**
@@ -85,8 +167,9 @@ binary-safe results, streaming sessions, permissions, limits and benchmarks.
 A Rust/Tokio TCP server with RESP2/RESP3, binary-safe keys and values, pipelining,
 all 19 Redis datatype families, and the 486-entry Redis 8.10 command catalog.
 Optional WAL persistence includes checksummed recovery and explicit fsync policy.
-Independent key-owning actors execute single-shard commands; a coordinator keeps
-cross-shard commands atomic.
+Exclusive shard leases protect single-shard execution; eligible memory-backed
+commands execute on the connection task without an actor round trip. A coordinator
+keeps cross-shard commands atomic.
 
 Without `--data-dir`, data is lost when the process stops. TLS, mutable ACLs,
 authenticated metrics/console, backups, native replication and ffkv clustering
@@ -331,9 +414,11 @@ The command baseline now includes the published Redis 8.10 catalog. Coverage
 and the remaining compatibility boundaries are documented below.
 
 The default is four shard actors; select `--shards 1` through `--shards 256`.
-Single-shard commands run on their owning actor. Cross-shard commands pause
-actors behind a barrier and move only affected entries into an atomic view,
-without copying their collection payloads. `MSET`/`MGET`, rename, set moves,
+Single-shard commands hold an exclusive shard lease. Eligible memory-backed
+commands execute directly on the connection task; queued workers retain ownership
+of hybrid I/O and checked execution. Cross-shard commands fence queued admission,
+acquire the shard leases, and move affected entries into an atomic view without
+copying their collection payloads. `MSET`/`MGET`, rename, set moves,
 algebra stores, and multi-key blocking pops retain command-level atomicity.
 The WAL has one ordered commit gate shared by all actors. Changing shard count
 on restart redistributes recovered keys without changing their identity.
@@ -827,9 +912,10 @@ the self-hosted BDD gate does not claim otherwise.
 - `src/journal.rs`: resolved logical mutation batches with absolute deadlines.
 - `src/wal.rs`: framed CRC32C WAL, locking, replay, and fsync policy.
 - `src/blocking.rs`: command actor, per-key consumer ordering, deadlines, and cancellation cleanup.
-- `src/sharding.rs`: independent actor ownership and coordinated transfer barrier.
+- `src/sharding.rs`: exclusive shard leases, queued workers, and coordinated transfer barrier.
 - `src/persistence.rs`: shared ordered WAL gate and fail-stop state.
-- `src/main.rs`: TCP connections and a bounded command channel feeding the actor.
+- `src/main.rs`: TCP connections, inline command execution, and bounded coordinator dispatch.
+- `src/output.rs`: bounded pipeline encoding, delivery accounting, and per-command observations.
 - `src/connection.rs`, `src/request.rs`, `src/state.rs`: per-client state, handshakes, and actual client metadata.
 - `src/executor.rs`, `src/watch.rs`: frozen atomic execution and bounded-lifetime WATCH versions.
 - `src/scripting.rs`, `src/functions.rs`, `src/scripting_control.rs`: bounded Lua, durable libraries, cancellation and debugger ownership.
@@ -846,10 +932,22 @@ the self-hosted BDD gate does not claim otherwise.
 - `tests/queue_smoke.py`: producer/consumer, list lifecycle, and differential scenarios.
 - `tests/durability_smoke.py`: restart, crash, partial-write, corruption, and write-error scenarios.
 
-Each shard actor owns its mutable state. A shared read/write admission barrier
-allows ordinary actors to progress independently and fences coordinated commands.
-Protocol code has no dependency on the storage implementation. Bulk responses
-are streamed without building another whole-payload response buffer.
+Each shard has one exclusive mutable-state lease shared by connection tasks and
+its queued worker. The direct path requires memory-backed, single-shard execution,
+no cluster/replica interception, and no registered blocking consumers; direct writes
+also require WAL recording and online backup to be inactive. A contended commit
+retains the lease and write permit independently of the connection until settlement. Cross-shard
+commands drain admitted queued work and acquire every shard lease before taking
+their atomic view. Coordinator failure stops new work even when connections retain
+pool handles; commands that already mutated still settle their commits.
+Protocol code has no dependency on the storage implementation. Replies to already
+buffered pipeline requests share an at-most-16-KiB encoding buffer, with at most
+16 pending command completions. Larger bulk payloads stream directly, using
+vectored writes where supported, without another whole-payload response buffer.
+Commands still execute and commit in order. Partial input, dependent waits,
+control commands and connection close flush earlier replies; single requests do
+not wait for a batching timer. A successful transport flush, including TLS, settles
+each command's delivery accounting. Pub/Sub messages stay budgeted through flush.
 The actor registers blocking consumers atomically with the initial key scan,
 so a push cannot be lost between checking and waiting. Timers use monotonic
 deadlines; per-key queues and a deadline index are removed on completion.
@@ -1257,6 +1355,18 @@ backlog matrices, with raw reports alongside the summary. All completed checks
 passed. Redis had higher median throughput in every matched main profile; ffkv
 also used more backlog RSS in the memory-backend comparison. This M4 run used
 battery power and Low Power Mode, so it is not an unrestricted capacity claim.
+
+Later matched Dragonfly results and controlled source A/B experiments are in the
+[benchmark guide](apps/docs/src/content/docs/contributing/benchmarks.md).
+The [resumed source analysis](benchmarks/results/dragonfly-vs-ffkv-2026-11-03/resumed-wave1-analysis.json)
+retains both gains and the rejected integer-storage candidate.
+The [concurrency experiment provenance](benchmarks/results/dragonfly-vs-ffkv-2026-11-03/resumed-concurrency-provenance.json)
+links subsequent admission/persistence results, raw evidence and limitations.
+An earlier fixed-frontend runtime was rolled back after severe hot-key
+regressions ([restoration evidence](benchmarks/results/dragonfly-vs-ffkv-2026-11-03/resumed-stable-runtime-restoration.json)).
+Actor-owned contention execution later fixed those regressions. The frontend
+runtimes are now the default, and the current matched results are in
+[Performance: ffkv vs Dragonfly vs Redis](#performance-ffkv-vs-dragonfly-vs-redis).
 
 For the complementary list backlog/RSS and fault/soak workloads:
 

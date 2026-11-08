@@ -4,6 +4,7 @@ use std::{
     fs::{self, File, OpenOptions, TryLockError},
     io::{self, Read, Seek, SeekFrom, Write},
     path::{Path, PathBuf},
+    sync::Arc,
 };
 
 use bytes::Bytes;
@@ -42,6 +43,18 @@ pub struct Checkpoint {
     pub data_frames: u64,
 }
 
+/// Shared by the live WAL and its replacement/backup snapshots. Unlock when the
+/// last logical owner leaves, not when an unrelated pre-exec child finally
+/// closes an inherited descriptor.
+struct DirectoryLease(File);
+
+impl Drop for DirectoryLease {
+    fn drop(&mut self) {
+        // Closing the descriptor follows this best-effort explicit release.
+        let _ = self.0.unlock();
+    }
+}
+
 pub struct Wal {
     file: tokio::fs::File,
     policy: Durability,
@@ -52,7 +65,7 @@ pub struct Wal {
     directory: PathBuf,
     failed: bool,
     // Drop the WAL handle before releasing the directory's exclusive lock.
-    _lock: File,
+    _lock: Arc<DirectoryLease>,
 }
 
 impl Wal {
@@ -72,8 +85,10 @@ impl Wal {
             ),
             TryLockError::Error(error) => context(error, "locking data directory"),
         })?;
+        let lock = Arc::new(DirectoryLease(lock));
         if new_lock {
-            lock.sync_all()
+            lock.0
+                .sync_all()
                 .map_err(|error| context(error, "syncing new LOCK file"))?;
             sync_directory(dir)?;
         }
@@ -261,7 +276,7 @@ impl Wal {
             dirty: true,
             directory: self.directory.clone(),
             failed: false,
-            _lock: self._lock.try_clone()?,
+            _lock: self._lock.clone(),
         };
         let mut data_frames = 0_u64;
         for batch in batches {
@@ -1598,7 +1613,10 @@ mod tests {
 
     fn run_binary(engine: &mut Engine, args: &[&[u8]]) -> Resp {
         let args: Vec<Bytes> = args.iter().map(|arg| Bytes::copy_from_slice(arg)).collect();
-        match engine.execute(&args).unwrap() {
+        match engine
+            .execute(&mut crate::engine::BoundCommand::bind(&args))
+            .unwrap()
+        {
             Execution::Reply(reply) | Execution::Pushed { reply, .. } => reply,
             Execution::Block(_) | Execution::StreamBlock(_) => {
                 panic!("WAL tests do not use blocking commands")
@@ -2669,6 +2687,59 @@ mod tests {
         drop(wal);
         let (_wal, recovery) = Wal::open(&dir.0, Durability::Strict, |_| Ok(())).unwrap();
         assert_eq!(recovery.records, 1);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_pre_exec_child_cannot_extend_a_released_directory_lease() {
+        use std::os::{fd::AsRawFd, unix::net::UnixStream};
+
+        struct Child {
+            pid: libc::pid_t,
+            release: UnixStream,
+        }
+        impl Drop for Child {
+            fn drop(&mut self) {
+                let _ = self.release.write_all(&[1]);
+                // SAFETY: this is our child; a null status pointer is permitted.
+                while unsafe { libc::waitpid(self.pid, std::ptr::null_mut(), 0) } < 0 {
+                    if io::Error::last_os_error().kind() != io::ErrorKind::Interrupted {
+                        break;
+                    }
+                }
+            }
+        }
+
+        let dir = TempDir::new();
+        let (wal, _) = Wal::open(&dir.0, Durability::Strict, |_| Ok(())).unwrap();
+        let (release, wait) = UnixStream::pair().unwrap();
+        wait.set_read_timeout(Some(std::time::Duration::from_secs(5)))
+            .unwrap();
+        let descriptor = wait.as_raw_fd();
+        // SAFETY: the child invokes only read and _exit, never Rust destructors
+        // or allocation. The socket timeout also bounds an orphaned child's life.
+        let pid = unsafe { libc::fork() };
+        assert!(pid >= 0, "fork failed: {}", io::Error::last_os_error());
+        if pid == 0 {
+            let mut byte = 0u8;
+            // SAFETY: descriptor is inherited and byte is writable for one byte.
+            unsafe {
+                libc::read(descriptor, (&mut byte as *mut u8).cast(), 1);
+                libc::_exit(0);
+            }
+        }
+        let child = Child { pid, release };
+        drop(wait);
+        drop(wal);
+        // CLOEXEC does not close an inherited descriptor until exec. Releasing
+        // the database must not depend on an unrelated child reaching exec.
+        let reopened = Wal::open(&dir.0, Durability::Strict, |_| Ok(()));
+        assert!(
+            reopened.is_ok(),
+            "child retained the released lease: {:?}",
+            reopened.err()
+        );
+        drop(child);
     }
 
     #[tokio::test]

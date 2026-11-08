@@ -364,6 +364,7 @@ class SnapshotReplay:
         self.thread.start()
 
     def _run(self):
+        handshake = []
         try:
             readable, _, _ = select.select([self.listener, self.wake_read], [], [], TIMEOUT)
             if self.stopped.is_set():
@@ -378,6 +379,7 @@ class SnapshotReplay:
             deadline = time.monotonic() + TIMEOUT
             while True:
                 args, _ = wire.command(deadline)
+                handshake.append(args[0])
                 if args[0].upper() == b"PSYNC":
                     break
                 assert args[0].upper() in (b"PING", b"REPLCONF"), args
@@ -401,7 +403,7 @@ class SnapshotReplay:
                         self.probe.socket.sendall(raw)
         except BaseException as error:
             if not self.stopped.is_set():
-                self.error = repr(error)
+                self.error = repr((error, handshake, self.ready.is_set()))
                 self.ready.set()
 
     def send(self, raw):
@@ -486,9 +488,15 @@ class NativeProbe:
             fixture.sequence += 1
             reply = self.apply_node.execute(["REPLICAOF", self.replay.address[0], self.replay.address[1]])
             assert not is_error(reply), reply
-            eventually(lambda: info(self.apply_node), lambda value: value.get("master_link_status") == "up" and int(value.get("slave_repl_offset", "-1")) == self.base_offset, "captured RDB was not installed by native follower")
-            assert self.apply_node.execute(["GET", self.snapshot_key], "__probe_snapshot_observer") == self.snapshot_value, "native follower did not install captured RDB data"
-            assert self.replay.error is None, self.replay.error
+            def replay_status():
+                assert self.replay.error is None, ("captured snapshot replay failed", self.replay.error)
+                return info(self.apply_node)
+            eventually(replay_status, lambda value: value.get("master_link_status") == "up" and int(value.get("slave_repl_offset", "-1")) == self.base_offset, "captured RDB was not installed by native follower")
+            eventually(
+                lambda: self.apply_node.execute(["GET", self.snapshot_key], "__probe_snapshot_observer"),
+                lambda value: value == self.snapshot_value,
+                "native follower did not install captured RDB data",
+            )
             # A FULLRESYNC header alone is not command success: the bounded,
             # validated RDB must actually install its sentinel in a real follower.
             fixture.root.evidence.positive("SYNC" if legacy else "PSYNC")

@@ -137,7 +137,7 @@ impl OnlineBackup {
             self.active.store(false, Ordering::Release);
         }
     }
-    fn begin(&self) -> io::Result<u64> {
+    pub(crate) fn begin(&self) -> io::Result<u64> {
         let mut s = self.status.lock().unwrap();
         if s.phase != Phase::Idle {
             return Err(invalid("backup already exists; CLEANUP is required"));
@@ -710,7 +710,7 @@ impl ServerHooks for PausedHooks<'_> {
 /// The caller authorizes commands and commits pending transaction mutations
 /// before checkpoint/capture controls. No request is sent back to the actor.
 pub async fn execute_paused(
-    args: &[Bytes],
+    command: &crate::engine::BoundCommand<'_>,
     paused: &mut Paused,
     persistence: &Persistence,
     state: &State,
@@ -738,7 +738,7 @@ pub async fn execute_paused(
         }),
     };
     Ok(server
-        .execute_with_hooks(args, CommandContext { database }, &hooks)
+        .execute_with_hooks(command, CommandContext { database }, &hooks)
         .await)
 }
 pub fn requires_commit(args: &[Bytes]) -> bool {
@@ -1105,10 +1105,12 @@ async fn shutdown(
                         return Err(invalid("Shutdown aborted"));
                     }
                     let status = native.status();
+                    // An unacknowledged replica may still be loading its
+                    // snapshot, even at a zero watermark of lazy history.
                     if status
                         .replicas
                         .iter()
-                        .all(|replica| replica.processed >= watermark)
+                        .all(|replica| replica.online && replica.processed >= watermark)
                         || tokio::time::Instant::now() >= deadline
                     {
                         break;
@@ -1274,7 +1276,13 @@ async fn info(c: &mut ActionContext<'_>, sections: &[String]) -> io::Result<Resp
             .get()
             .ok_or_else(|| invalid("native replication is not initialized"))?
             .status();
-        write!(&mut text,"\r\n# Replication\r\nrole:{}\r\nmaster_replid:{}\r\nmaster_replid2:{}\r\nmaster_repl_offset:{}\r\nsecond_repl_offset:{}\r\nslave_repl_offset:{}\r\nslave_fsynced_repl_offset:{}\r\nconnected_slaves:{}\r\nmaster_connect_denied:{}\r\nmaster_failover_state:{}\r\n",if s.role==crate::native_replication::Role::Primary{"master"}else{"slave"},s.history,s.secondary_history.as_deref().unwrap_or("0000000000000000000000000000000000000000"),s.offset,s.secondary_valid_through,s.offset,s.fsynced_offset,s.replicas.iter().filter(|r|r.online).count(),s.master_connect_denied,if s.failover_active{"in-progress"}else{"no-failover"}).unwrap();
+        write!(&mut text,"\r\n# Replication\r\nrole:{}\r\nmaster_replid:{}\r\nmaster_replid2:{}\r\nmaster_repl_offset:{}\r\nsecond_repl_offset:{}\r\nslave_repl_offset:{}\r\nslave_fsynced_repl_offset:{}\r\nconnected_slaves:{}\r\nmaster_connect_denied:{}\r\nmaster_failover_state:{}\r\n",if s.role==crate::native_replication::Role::Primary{"master"}else{"slave"},s.history,s.secondary_history.as_deref().unwrap_or("0000000000000000000000000000000000000000"),s.offset,s.secondary_valid_through,s.offset,s.fsynced_offset.unwrap_or(0),s.replicas.iter().filter(|r|r.online).count(),s.master_connect_denied,if s.failover_active{"in-progress"}else{"no-failover"}).unwrap();
+        write!(
+            &mut text,
+            "repl_backlog_active:{}\r\n",
+            u8::from(s.history_active)
+        )
+        .unwrap();
         if let Some((host, port)) = s.upstream {
             write!(
                 &mut text,
@@ -1312,28 +1320,19 @@ async fn info(c: &mut ActionContext<'_>, sections: &[String]) -> io::Result<Resp
 }
 
 async fn configure(c: &mut ActionContext<'_>, changes: Vec<(String, Bytes)>) -> io::Result<Resp> {
-    let mut enabled = c.persistence.enabled();
-    let status = c.persistence.status().await;
-    let mut policy = if status.policy == "everysec" {
-        Durability::Everysec
-    } else {
-        Durability::Strict
-    };
-    let mut persistence_change = false;
+    // Unset AOF settings keep the values the persistence gate holds when it
+    // applies this change, including a policy configured while AOF was off.
+    // Both settings of one change apply together under that gate.
+    let mut enabled = None;
+    let mut policy = None;
     let mut databases = None;
     let mut clients = None;
     let mut ttl = None;
     // No effects until every member of the transaction has been validated.
     for (name, value) in &changes {
         match name.as_str() {
-            "appendonly" => {
-                enabled = parse_bool(value)?;
-                persistence_change = true;
-            }
-            "appendfsync" => {
-                policy = parse_policy(value)?;
-                persistence_change = true;
-            }
+            "appendonly" => enabled = Some(parse_bool(value)?),
+            "appendfsync" => policy = Some(parse_policy(value)?),
             "databases" => {
                 let n = parse_u64(value, 1, 65536)? as u32;
                 if c.state.cluster.get().is_some() && n != 1 {
@@ -1367,7 +1366,7 @@ async fn configure(c: &mut ActionContext<'_>, changes: Vec<(String, Bytes)>) -> 
                 ));
             }
         }
-        if persistence_change {
+        if enabled.is_some() || policy.is_some() {
             let timestamp = Engine::now();
             c.persistence
                 .configure(
@@ -1379,9 +1378,6 @@ async fn configure(c: &mut ActionContext<'_>, changes: Vec<(String, Bytes)>) -> 
                         .flat_map(|engine| engine.snapshot_batches(timestamp)),
                 )
                 .await?;
-            if let Some(native) = c.state.native.get() {
-                native.set_aof_enabled(enabled);
-            }
         }
         if let Some(count) = databases {
             c.runtime.databases.store(count, Ordering::Release);

@@ -54,6 +54,10 @@ libloading = "0.8.9"
 rmcp = { version = "3.8.0", default-features = false, features = ["server", "transport-io"] }
 tokio-util = { version = "0.7", features = ["rt"] }
 tokio-tungstenite = { version = "0.29", default-features = false, features = ["connect", "rustls-tls-webpki-roots"] }
+smallvec = "1.16"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["test-util"] }
 
 [build-dependencies]
 cc = "1.2"

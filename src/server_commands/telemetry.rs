@@ -5,16 +5,22 @@ use crate::protocol::Resp;
 use bytes::Bytes;
 use rand::Rng;
 use std::{
+    borrow::Cow,
     collections::{BTreeMap, HashMap, HashSet, VecDeque},
     time::{Duration, Instant},
 };
 
 pub struct Observation<'a> {
     pub args: &'a [Bytes],
-    pub keys: &'a [Bytes],
+    /// Keys the command accessed, in argument order with repeats. `None` means
+    /// a builtin command whose keys HOTKEYS derives from `args` itself, only
+    /// while a session is active; `Some` is an already resolved list, such as a
+    /// dynamic-module command's, which must never be extracted under locks.
+    pub keys: Option<&'a [Bytes]>,
     pub database: u32,
     pub client_address: &'a str,
-    pub client_name: &'a str,
+    /// Raw `CLIENT SETNAME` bytes; the slow log keeps them as lossy UTF-8.
+    pub client_name: &'a [u8],
     pub elapsed: Duration,
     pub cpu_time: Duration,
     pub input_bytes: u64,
@@ -56,6 +62,34 @@ fn config_integer(config: &ConfigSnapshot, name: &str, default: i64) -> i64 {
         .and_then(|p| integer(&p.value))
         .unwrap_or(default)
 }
+/// The observation parameters, parsed once per configuration publication rather
+/// than per command. Missing or unparsable values take the defaults.
+#[derive(Clone, Copy)]
+struct ObservationSettings {
+    /// `latency-monitor-threshold` in milliseconds; zero or less disables.
+    latency_threshold_ms: i64,
+    /// `latency-tracking`: per-command latency histograms.
+    latency_tracking: bool,
+    /// `slowlog-log-slower-than` in microseconds; negative (`None`) disables.
+    slowlog_slower_than: Option<u64>,
+    /// `slowlog-max-len`, enforced at each observation rather than publication.
+    slowlog_max_len: usize,
+}
+impl ObservationSettings {
+    fn new(config: &ConfigSnapshot) -> Self {
+        let slower_than = config_integer(config, "slowlog-log-slower-than", 10000);
+        let max_len = config_integer(config, "slowlog-max-len", 128).clamp(0, 100000);
+        Self {
+            latency_threshold_ms: config_integer(config, "latency-monitor-threshold", 0),
+            latency_tracking: config
+                .parameters
+                .get("latency-tracking")
+                .is_none_or(|p| p.value.eq_ignore_ascii_case(b"yes")),
+            slowlog_slower_than: u64::try_from(slower_than).ok(),
+            slowlog_max_len: max_len as usize,
+        }
+    }
+}
 struct LatencyEvent {
     samples: VecDeque<(u64, u64)>,
     maximum: u64,
@@ -63,6 +97,77 @@ struct LatencyEvent {
 struct Histogram {
     calls: u64,
     buckets: [u64; 31],
+}
+impl Histogram {
+    fn record(&mut self, elapsed: Duration) {
+        self.calls = self.calls.saturating_add(1);
+        let nanos = elapsed.as_nanos().min(1_000_000_001) as u64;
+        let bucket = if nanos <= 1 {
+            0
+        } else {
+            (64 - (nanos - 1).leading_zeros() as usize).min(30)
+        };
+        self.buckets[bucket] = self.buckets[bucket].saturating_add(1);
+    }
+}
+/// Histogram names up to this many bytes are normalized on the stack; longer
+/// names take the allocating path and produce the same key.
+const INLINE_HISTOGRAM_NAME: usize = 128;
+/// Lowercased command name, grouped as `container|subcommand` for the listed
+/// containers. Invalid UTF-8 is replaced exactly as `String::from_utf8_lossy` does.
+fn histogram_name<'a>(
+    name: &[u8],
+    sub: Option<&Bytes>,
+    buffer: &'a mut [u8; INLINE_HISTOGRAM_NAME],
+) -> Cow<'a, str> {
+    fn grouped(lowercase: &[u8]) -> bool {
+        matches!(
+            lowercase,
+            b"config"
+                | b"acl"
+                | b"client"
+                | b"latency"
+                | b"slowlog"
+                | b"memory"
+                | b"hotkeys"
+                | b"backup"
+                | b"module"
+                | b"command"
+                | b"function"
+                | b"script"
+        )
+    }
+    if name.len() <= buffer.len() {
+        let mut len = name.len();
+        buffer[..len].copy_from_slice(name);
+        buffer[..len].make_ascii_lowercase();
+        let fits = match sub.filter(|_| grouped(&buffer[..len])) {
+            Some(sub) if len + 1 + sub.len() <= buffer.len() => {
+                buffer[len] = b'|';
+                let end = len + 1 + sub.len();
+                buffer[len + 1..end].copy_from_slice(sub);
+                buffer[len + 1..end].make_ascii_lowercase();
+                len = end;
+                true
+            }
+            Some(_) => false,
+            None => true,
+        };
+        // ASCII lowercasing keeps valid UTF-8 valid, and `|` cannot complete or
+        // continue a multibyte sequence, so the joined key is valid exactly when
+        // both parts are; otherwise fall through to lossy replacement.
+        if fits && let Ok(command) = std::str::from_utf8(&buffer[..len]) {
+            return Cow::Borrowed(command);
+        }
+    }
+    let mut command = String::from_utf8_lossy(name).to_ascii_lowercase();
+    if grouped(command.as_bytes())
+        && let Some(sub) = sub
+    {
+        command.push('|');
+        command.push_str(&String::from_utf8_lossy(sub).to_ascii_lowercase());
+    }
+    Cow::Owned(command)
 }
 struct SlowEntry {
     id: u64,
@@ -129,20 +234,27 @@ impl Hotkeys {
             .saturating_add(observation.output_bytes);
         self.cpu_us = self.cpu_us.saturating_add(cpu);
         self.net_bytes = self.net_bytes.saturating_add(net);
-        if observation.keys.is_empty() {
+        let derived;
+        let keys = match observation.keys {
+            Some(keys) => keys,
+            None => {
+                derived = crate::engine::BoundCommand::bind(observation.args).accessed_keys();
+                derived.as_slice()
+            }
+        };
+        if keys.is_empty() {
             return;
         }
-        let selected = observation
-            .keys
+        let selected = keys
             .iter()
             .enumerate()
             .filter(|(index, key)| {
-                !observation.keys[..*index].contains(key)
+                !keys[..*index].contains(key)
                     && (self.slots.is_empty() || self.slots.contains(&slot(key)))
             })
             .count() as u64;
-        let selected_cpu = cpu.saturating_mul(selected) / observation.keys.len() as u64;
-        let selected_net = net.saturating_mul(selected) / observation.keys.len() as u64;
+        let selected_cpu = cpu.saturating_mul(selected) / keys.len() as u64;
+        let selected_net = net.saturating_mul(selected) / keys.len() as u64;
         self.selected_cpu_us = self.selected_cpu_us.saturating_add(selected_cpu);
         self.selected_net_bytes = self.selected_net_bytes.saturating_add(selected_net);
         if rand::rng().random_range(0..self.ratio) != 0 {
@@ -150,14 +262,14 @@ impl Hotkeys {
         }
         self.sampled_cpu_us = self.sampled_cpu_us.saturating_add(selected_cpu);
         self.sampled_net_bytes = self.sampled_net_bytes.saturating_add(selected_net);
-        for (index, key) in observation.keys.iter().enumerate() {
-            if observation.keys[..index].contains(key)
+        for (index, key) in keys.iter().enumerate() {
+            if keys[..index].contains(key)
                 || !self.slots.is_empty() && !self.slots.contains(&slot(key))
             {
                 continue;
             }
-            let per_cpu = cpu / observation.keys.len() as u64;
-            let per_net = net / observation.keys.len() as u64;
+            let per_cpu = cpu / keys.len() as u64;
+            let per_net = net / keys.len() as u64;
             // Bounded sampled weighted counters retain candidates under a stream
             // of unique keys; values are estimates, not an exact global ranking.
             if !self.values.contains_key(key)
@@ -296,6 +408,7 @@ pub(super) struct Telemetry {
     pub errors: u64,
     pub input_bytes: u64,
     pub output_bytes: u64,
+    settings: ObservationSettings,
     events: BTreeMap<String, LatencyEvent>,
     histograms: BTreeMap<String, Histogram>,
     slow: VecDeque<SlowEntry>,
@@ -303,12 +416,13 @@ pub(super) struct Telemetry {
     hotkeys: Option<Hotkeys>,
 }
 impl Telemetry {
-    pub fn new() -> Self {
+    pub fn new(config: &ConfigSnapshot) -> Self {
         Self {
             commands: 0,
             errors: 0,
             input_bytes: 0,
             output_bytes: 0,
+            settings: ObservationSettings::new(config),
             events: BTreeMap::new(),
             histograms: BTreeMap::new(),
             slow: VecDeque::new(),
@@ -316,6 +430,17 @@ impl Telemetry {
             hotkeys: None,
         }
     }
+    /// Adopts a published configuration for every later observation.
+    pub fn configure(&mut self, config: &ConfigSnapshot) {
+        self.settings = ObservationSettings::new(config);
+    }
+    /// A HOTKEYS session is tracking: the only telemetry that reads command
+    /// CPU time. A session past its duration counts until an observation or
+    /// HOTKEYS command notices.
+    pub fn hotkeys_active(&self) -> bool {
+        self.hotkeys.as_ref().is_some_and(|hotkeys| hotkeys.active)
+    }
+    /// Clears statistics only; observation settings follow configuration.
     pub fn reset_statistics(&mut self) {
         self.commands = 0;
         self.errors = 0;
@@ -351,61 +476,41 @@ impl Telemetry {
         }
         event.samples.push_back((second, milliseconds));
     }
-    pub fn observe(&mut self, observation: Observation<'_>, config: &ConfigSnapshot) {
+    pub fn observe(&mut self, observation: &Observation<'_>) {
+        let settings = self.settings;
         self.commands = self.commands.saturating_add(1);
         self.errors = self.errors.saturating_add(u64::from(observation.failed));
         self.input_bytes = self.input_bytes.saturating_add(observation.input_bytes);
         self.output_bytes = self.output_bytes.saturating_add(observation.output_bytes);
-        self.latency(
-            "command",
-            observation.elapsed,
-            config_integer(config, "latency-monitor-threshold", 0),
-        );
-        if config
-            .parameters
-            .get("latency-tracking")
-            .is_none_or(|p| p.value.eq_ignore_ascii_case(b"yes"))
+        // The monitor is off at a threshold of zero or less, as `latency` checks.
+        if settings.latency_threshold_ms > 0 {
+            self.latency(
+                "command",
+                observation.elapsed,
+                settings.latency_threshold_ms,
+            );
+        }
+        if settings.latency_tracking
             && let Some(name) = observation.args.first()
         {
-            let mut command = String::from_utf8_lossy(name).to_ascii_lowercase();
-            if matches!(
-                command.as_str(),
-                "config"
-                    | "acl"
-                    | "client"
-                    | "latency"
-                    | "slowlog"
-                    | "memory"
-                    | "hotkeys"
-                    | "backup"
-                    | "module"
-                    | "command"
-                    | "function"
-                    | "script"
-            ) && let Some(sub) = observation.args.get(1)
-            {
-                command.push('|');
-                command.push_str(&String::from_utf8_lossy(sub).to_ascii_lowercase());
-            }
-            if self.histograms.contains_key(&command) || self.histograms.len() < 2048 {
-                let histogram = self.histograms.entry(command).or_insert(Histogram {
+            let mut buffer = [0; INLINE_HISTOGRAM_NAME];
+            let command = histogram_name(name, observation.args.get(1), &mut buffer);
+            if let Some(histogram) = self.histograms.get_mut(command.as_ref()) {
+                histogram.record(observation.elapsed);
+            } else if self.histograms.len() < 2048 {
+                let mut histogram = Histogram {
                     calls: 0,
                     buckets: [0; 31],
-                });
-                histogram.calls = histogram.calls.saturating_add(1);
-                let nanos = observation.elapsed.as_nanos().min(1_000_000_001) as u64;
-                let bucket = if nanos <= 1 {
-                    0
-                } else {
-                    (64 - (nanos - 1).leading_zeros() as usize).min(30)
                 };
-                histogram.buckets[bucket] = histogram.buckets[bucket].saturating_add(1);
+                histogram.record(observation.elapsed);
+                self.histograms.insert(command.into_owned(), histogram);
             }
         }
-        let max_len = config_integer(config, "slowlog-max-len", 128).clamp(0, 100000) as usize;
-        let threshold = config_integer(config, "slowlog-log-slower-than", 10000);
         let micros = observation.elapsed.as_micros().min(u64::MAX as u128) as u64;
-        if threshold >= 0 && micros >= threshold as u64 && max_len != 0 {
+        if settings.slowlog_max_len != 0
+            && let Some(threshold) = settings.slowlog_slower_than
+            && micros >= threshold
+        {
             let args = redacted(observation.args)
                 .into_iter()
                 .take(32)
@@ -427,15 +532,15 @@ impl Telemetry {
                 microseconds: micros,
                 args,
                 address: Bytes::copy_from_slice(observation.client_address.as_bytes()),
-                name: Bytes::copy_from_slice(observation.client_name.as_bytes()),
+                name: Bytes::from(String::from_utf8_lossy(observation.client_name).into_owned()),
             });
             self.next_slow_id = self.next_slow_id.saturating_add(1);
         }
-        while self.slow.len() > max_len {
+        while self.slow.len() > settings.slowlog_max_len {
             self.slow.pop_back();
         }
         if let Some(hotkeys) = self.hotkeys.as_mut() {
-            hotkeys.observe(&observation);
+            hotkeys.observe(observation);
         }
     }
     pub fn latency_command(&mut self, args: &[Bytes]) -> Resp {
@@ -896,4 +1001,419 @@ pub(super) fn monitor_line(observation: &Observation<'_>) -> Bytes {
         line.push(b'\"');
     }
     Bytes::from(line)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn observe(telemetry: &mut Telemetry, args: &[&[u8]]) {
+        let args: Vec<Bytes> = args.iter().map(|arg| Bytes::copy_from_slice(arg)).collect();
+        telemetry.observe(&Observation {
+            args: &args,
+            keys: Some(&[]),
+            database: 0,
+            client_address: "127.0.0.1:1",
+            client_name: b"",
+            elapsed: Duration::from_micros(5),
+            cpu_time: Duration::ZERO,
+            input_bytes: 0,
+            output_bytes: 0,
+            failed: false,
+        });
+    }
+
+    /// Histogram names and call counts as reported by `LATENCY HISTOGRAM`.
+    fn histogram_calls(telemetry: &mut Telemetry) -> BTreeMap<String, i64> {
+        let reply = telemetry.latency_command(&[
+            Bytes::from_static(b"LATENCY"),
+            Bytes::from_static(b"HISTOGRAM"),
+        ]);
+        let Resp::Map(entries) = reply else {
+            panic!("histogram reply {reply:?}");
+        };
+        entries
+            .into_iter()
+            .map(|(name, detail)| {
+                let Resp::Bulk(Some(name)) = name else {
+                    panic!("histogram name {name:?}");
+                };
+                let Resp::Map(detail) = detail else {
+                    panic!("histogram detail {detail:?}");
+                };
+                let calls = match &detail[0] {
+                    (Resp::Bulk(Some(label)), Resp::Integer(calls)) if label == "calls" => *calls,
+                    other => panic!("histogram calls {other:?}"),
+                };
+                (String::from_utf8(name.to_vec()).unwrap(), calls)
+            })
+            .collect()
+    }
+
+    fn calls<const N: usize>(entries: [(&str, i64); N]) -> BTreeMap<String, i64> {
+        entries
+            .into_iter()
+            .map(|(name, calls)| (name.to_owned(), calls))
+            .collect()
+    }
+
+    #[test]
+    fn histogram_names_fold_ascii_case_and_group_only_listed_containers() {
+        let mut telemetry = Telemetry::new(&ConfigSnapshot::default());
+        observe(&mut telemetry, &[b"GET", b"k"]);
+        observe(&mut telemetry, &[b"get", b"k"]);
+        observe(&mut telemetry, &[b"gEt"]);
+        observe(&mut telemetry, &[b"CONFIG", b"GET", b"maxmemory"]);
+        observe(&mut telemetry, &[b"config", b"get"]);
+        observe(&mut telemetry, &[b"Client", b"List"]);
+        observe(&mut telemetry, &[b"CONFIG"]);
+        observe(&mut telemetry, &[b"XINFO", b"STREAM", b"s"]);
+        observe(&mut telemetry, &[b"CONFIGS", b"GET"]);
+        observe(&mut telemetry, &["ÉCHO".as_bytes(), b"x"]);
+        assert_eq!(
+            histogram_calls(&mut telemetry),
+            calls([
+                ("Écho", 1),
+                ("client|list", 1),
+                ("config", 1),
+                ("config|get", 2),
+                ("configs", 1),
+                ("get", 3),
+                ("xinfo", 1),
+            ])
+        );
+    }
+
+    #[test]
+    fn histogram_names_replace_invalid_utf8_and_never_group_invalid_containers() {
+        let mut telemetry = Telemetry::new(&ConfigSnapshot::default());
+        observe(&mut telemetry, &[b"G\xffET"]);
+        observe(&mut telemetry, &[b"CONFIG", b"G\xffT"]);
+        observe(&mut telemetry, &[b"config", b"g\xfft"]);
+        observe(&mut telemetry, &[b"CONFIG\xff", b"GET"]);
+        observe(&mut telemetry, &[b"ACL", b"\xe2\x82"]);
+        assert_eq!(
+            histogram_calls(&mut telemetry),
+            calls([
+                ("acl|\u{fffd}", 1),
+                ("config\u{fffd}", 1),
+                ("config|g\u{fffd}t", 2),
+                ("g\u{fffd}et", 1),
+            ])
+        );
+    }
+
+    #[test]
+    fn long_histogram_names_keep_one_key_across_the_inline_bound() {
+        let mut telemetry = Telemetry::new(&ConfigSnapshot::default());
+        for len in [
+            INLINE_HISTOGRAM_NAME,
+            INLINE_HISTOGRAM_NAME + 1,
+            INLINE_HISTOGRAM_NAME * 3,
+        ] {
+            observe(&mut telemetry, &[&vec![b'N'; len]]);
+            observe(&mut telemetry, &[&vec![b'n'; len]]);
+        }
+        // "config|" is seven bytes; these subcommands end exactly at and one past the bound.
+        for len in [INLINE_HISTOGRAM_NAME - 7, INLINE_HISTOGRAM_NAME - 6] {
+            observe(&mut telemetry, &[b"CONFIG", &vec![b'S'; len]]);
+            observe(&mut telemetry, &[b"config", &vec![b's'; len]]);
+        }
+        let name = |byte: char, len: usize| byte.to_string().repeat(len);
+        assert_eq!(
+            histogram_calls(&mut telemetry),
+            BTreeMap::from([
+                (
+                    format!("config|{}", name('s', INLINE_HISTOGRAM_NAME - 7)),
+                    2
+                ),
+                (
+                    format!("config|{}", name('s', INLINE_HISTOGRAM_NAME - 6)),
+                    2
+                ),
+                (name('n', INLINE_HISTOGRAM_NAME), 2),
+                (name('n', INLINE_HISTOGRAM_NAME + 1), 2),
+                (name('n', INLINE_HISTOGRAM_NAME * 3), 2),
+            ])
+        );
+    }
+
+    #[test]
+    fn histogram_limit_admits_existing_names_only_until_reset() {
+        let mut telemetry = Telemetry::new(&ConfigSnapshot::default());
+        let long = vec![b'L'; INLINE_HISTOGRAM_NAME * 2];
+        observe(&mut telemetry, &[&long]);
+        for index in 1..2048 {
+            observe(&mut telemetry, &[format!("cmd{index}").as_bytes()]);
+        }
+        observe(&mut telemetry, &[b"overflow"]);
+        observe(&mut telemetry, &[b"CONFIG", b"GET"]);
+        observe(&mut telemetry, &[b"CMD7"]);
+        observe(&mut telemetry, &[&long.to_ascii_lowercase()]);
+        let histograms = histogram_calls(&mut telemetry);
+        assert_eq!(histograms.len(), 2048);
+        assert!(!histograms.contains_key("overflow"));
+        assert!(!histograms.contains_key("config|get"));
+        assert_eq!(histograms["cmd7"], 2);
+        assert_eq!(histograms[&"l".repeat(INLINE_HISTOGRAM_NAME * 2)], 2);
+        assert_eq!(telemetry.commands, 2052);
+
+        telemetry.reset_statistics();
+        observe(&mut telemetry, &[b"OVERFLOW"]);
+        assert_eq!(histogram_calls(&mut telemetry), calls([("overflow", 1)]));
+    }
+
+    #[test]
+    fn latency_tracking_config_transitions_pause_and_resume_histograms() {
+        let mut config = ConfigSnapshot::default();
+        let mut telemetry = Telemetry::new(&config);
+        let set = |config: &mut ConfigSnapshot, value: &'static [u8]| {
+            config.parameters.get_mut("latency-tracking").unwrap().value =
+                Bytes::from_static(value);
+        };
+        observe(&mut telemetry, &[b"GET"]);
+        set(&mut config, b"no");
+        telemetry.configure(&config);
+        observe(&mut telemetry, &[b"GET"]);
+        observe(&mut telemetry, &[b"SET"]);
+        assert_eq!(histogram_calls(&mut telemetry), calls([("get", 1)]));
+        set(&mut config, b"YES");
+        telemetry.configure(&config);
+        observe(&mut telemetry, &[b"GET"]);
+        // A missing parameter takes the default, not the previous setting.
+        set(&mut config, b"no");
+        telemetry.configure(&config);
+        config.parameters.remove("latency-tracking");
+        telemetry.configure(&config);
+        observe(&mut telemetry, &[b"get"]);
+        assert_eq!(histogram_calls(&mut telemetry), calls([("get", 3)]));
+        assert_eq!(telemetry.commands, 5);
+    }
+
+    fn command(args: &[&str]) -> Vec<Bytes> {
+        args.iter()
+            .map(|arg| Bytes::copy_from_slice(arg.as_bytes()))
+            .collect()
+    }
+
+    fn observation<'a>(
+        args: &'a [Bytes],
+        keys: Option<&'a [Bytes]>,
+        cpu_us: u64,
+        input_bytes: u64,
+        output_bytes: u64,
+    ) -> Observation<'a> {
+        Observation {
+            args,
+            keys,
+            database: 0,
+            client_address: "127.0.0.1:1",
+            client_name: b"",
+            elapsed: Duration::from_micros(5),
+            cpu_time: Duration::from_micros(cpu_us),
+            input_bytes,
+            output_bytes,
+            failed: false,
+        }
+    }
+
+    fn hotkeys(telemetry: &mut Telemetry, args: &[&str], cluster: bool) -> Resp {
+        telemetry.hotkeys_command(&command(args), cluster)
+    }
+
+    /// `HOTKEYS GET` fields by name, or `None` without a session.
+    fn report(telemetry: &mut Telemetry) -> Option<BTreeMap<String, Resp>> {
+        match hotkeys(telemetry, &["HOTKEYS", "GET"], false) {
+            Resp::Bulk(None) => None,
+            Resp::Array(Some(mut reply)) if reply.len() == 1 => {
+                let Resp::Map(fields) = reply.remove(0) else {
+                    panic!("hotkeys fields {reply:?}");
+                };
+                Some(
+                    fields
+                        .into_iter()
+                        .map(|(name, value)| {
+                            let Resp::Bulk(Some(name)) = name else {
+                                panic!("hotkeys field name {name:?}");
+                            };
+                            (String::from_utf8(name.to_vec()).unwrap(), value)
+                        })
+                        .collect(),
+                )
+            }
+            other => panic!("hotkeys reply {other:?}"),
+        }
+    }
+
+    fn ranking(value: &Resp) -> Vec<(String, i64)> {
+        let Resp::Array(Some(entries)) = value else {
+            panic!("hotkeys ranking {value:?}");
+        };
+        entries
+            .chunks(2)
+            .map(|pair| match pair {
+                [Resp::Bulk(Some(key)), Resp::Integer(value)] => {
+                    (String::from_utf8(key.to_vec()).unwrap(), *value)
+                }
+                other => panic!("hotkeys ranking entry {other:?}"),
+            })
+            .collect()
+    }
+
+    fn ranked<const N: usize>(entries: [(&str, i64); N]) -> Vec<(String, i64)> {
+        entries
+            .into_iter()
+            .map(|(key, value)| (key.to_owned(), value))
+            .collect()
+    }
+
+    #[test]
+    fn hotkeys_session_started_after_capture_derives_builtin_keys_at_observation() {
+        let mut telemetry = Telemetry::new(&ConfigSnapshot::default());
+        let args = command(&["MGET", "a", "b", "a"]);
+        telemetry.observe(&observation(&args, None, 30, 10, 2));
+        assert_eq!(report(&mut telemetry), None);
+
+        // Captured before the session starts, observed after: still accounted.
+        let captured = observation(&args, None, 30, 10, 2);
+        assert_eq!(
+            hotkeys(
+                &mut telemetry,
+                &["HOTKEYS", "START", "METRICS", "2", "CPU", "NET"],
+                false
+            ),
+            Resp::Simple("OK")
+        );
+        telemetry.observe(&captured);
+
+        let fields = report(&mut telemetry).unwrap();
+        assert_eq!(fields["tracking-active"], Resp::Integer(1));
+        assert_eq!(fields["all-commands-all-slots-us"], Resp::Integer(30));
+        assert_eq!(
+            fields["net-bytes-all-commands-all-slots"],
+            Resp::Integer(12)
+        );
+        assert_eq!(fields["total-net-bytes"], Resp::Integer(12));
+        // The repeated key counts once, at its share of all three positions.
+        assert_eq!(
+            ranking(&fields["by-cpu-time-us"]),
+            ranked([("a", 10), ("b", 10)])
+        );
+        assert_eq!(
+            ranking(&fields["by-net-bytes"]),
+            ranked([("a", 4), ("b", 4)])
+        );
+        assert!(!fields.contains_key("all-commands-selected-slots-us"));
+    }
+
+    #[test]
+    fn hotkeys_slot_filter_selects_unique_builtin_keys_against_the_full_key_count() {
+        let mut telemetry = Telemetry::new(&ConfigSnapshot::default());
+        let selected = slot(b"a");
+        assert_ne!(selected, slot(b"b"));
+        let selected = selected.to_string();
+        assert_eq!(
+            hotkeys(
+                &mut telemetry,
+                &[
+                    "HOTKEYS",
+                    "START",
+                    "METRICS",
+                    "2",
+                    "CPU",
+                    "NET",
+                    "SLOTS",
+                    "1",
+                    selected.as_str(),
+                ],
+                true
+            ),
+            Resp::Simple("OK")
+        );
+        let multiple = command(&["MGET", "a", "b", "a"]);
+        telemetry.observe(&observation(&multiple, None, 30, 10, 2));
+        let other = command(&["GET", "b"]);
+        telemetry.observe(&observation(&other, None, 9, 3, 0));
+
+        let fields = report(&mut telemetry).unwrap();
+        assert_eq!(fields["all-commands-all-slots-us"], Resp::Integer(39));
+        assert_eq!(
+            fields["net-bytes-all-commands-all-slots"],
+            Resp::Integer(15)
+        );
+        assert_eq!(fields["all-commands-selected-slots-us"], Resp::Integer(10));
+        assert_eq!(
+            fields["net-bytes-all-commands-selected-slots"],
+            Resp::Integer(4)
+        );
+        assert!(!fields.contains_key("sampled-commands-selected-slots-us"));
+        assert_eq!(ranking(&fields["by-cpu-time-us"]), ranked([("a", 10)]));
+        assert_eq!(ranking(&fields["by-net-bytes"]), ranked([("a", 4)]));
+    }
+
+    #[test]
+    fn hotkeys_account_resolved_keys_instead_of_arguments() {
+        let mut telemetry = Telemetry::new(&ConfigSnapshot::default());
+        assert_eq!(
+            hotkeys(
+                &mut telemetry,
+                &["HOTKEYS", "START", "METRICS", "1", "CPU"],
+                false
+            ),
+            Resp::Simple("OK")
+        );
+        // A module command reports exactly the keys its own extraction resolved,
+        // and none when it could not be prepared, whatever its arguments look like.
+        let args = command(&["MOD.TOUCH", "m", "n"]);
+        let resolved = command(&["m"]);
+        telemetry.observe(&observation(&args, Some(resolved.as_slice()), 8, 1, 1));
+        let unprepared = command(&["MOD.TOUCH", "n"]);
+        telemetry.observe(&observation(&unprepared, Some(&[]), 5, 1, 1));
+
+        let fields = report(&mut telemetry).unwrap();
+        assert_eq!(fields["all-commands-all-slots-us"], Resp::Integer(13));
+        assert_eq!(fields["net-bytes-all-commands-all-slots"], Resp::Integer(4));
+        assert_eq!(ranking(&fields["by-cpu-time-us"]), ranked([("m", 8)]));
+        assert!(!fields.contains_key("by-net-bytes"));
+    }
+
+    #[test]
+    fn hotkeys_stop_and_reset_end_key_accounting() {
+        let mut telemetry = Telemetry::new(&ConfigSnapshot::default());
+        let start = ["HOTKEYS", "START", "METRICS", "1", "CPU"];
+        let (a, b) = (command(&["GET", "a"]), command(&["GET", "b"]));
+        assert_eq!(hotkeys(&mut telemetry, &start, false), Resp::Simple("OK"));
+        telemetry.observe(&observation(&a, None, 4, 0, 0));
+        assert_eq!(
+            hotkeys(&mut telemetry, &["HOTKEYS", "STOP"], false),
+            Resp::Simple("OK")
+        );
+        telemetry.observe(&observation(&b, None, 6, 0, 0));
+        let fields = report(&mut telemetry).unwrap();
+        assert_eq!(fields["tracking-active"], Resp::Integer(0));
+        assert_eq!(fields["all-commands-all-slots-us"], Resp::Integer(4));
+        assert_eq!(ranking(&fields["by-cpu-time-us"]), ranked([("a", 4)]));
+        assert_eq!(
+            hotkeys(&mut telemetry, &["HOTKEYS", "STOP"], false),
+            Resp::Error("ERR Hotkeys tracking is not active".into())
+        );
+
+        // A new session starts from nothing.
+        assert_eq!(hotkeys(&mut telemetry, &start, false), Resp::Simple("OK"));
+        telemetry.observe(&observation(&b, None, 6, 0, 0));
+        let fields = report(&mut telemetry).unwrap();
+        assert_eq!(fields["all-commands-all-slots-us"], Resp::Integer(6));
+        assert_eq!(ranking(&fields["by-cpu-time-us"]), ranked([("b", 6)]));
+
+        assert_eq!(
+            hotkeys(&mut telemetry, &["HOTKEYS", "RESET"], false),
+            Resp::Simple("OK")
+        );
+        telemetry.observe(&observation(&a, None, 4, 0, 0));
+        assert_eq!(report(&mut telemetry), None);
+        assert_eq!(
+            hotkeys(&mut telemetry, &["HOTKEYS", "STOP"], false),
+            Resp::Error("ERR No hotkeys tracking session".into())
+        );
+    }
 }

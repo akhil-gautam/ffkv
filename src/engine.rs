@@ -6,7 +6,7 @@ mod databases;
 mod key_specs;
 mod registry;
 mod replica_expiry;
-use registry::{effective_spec, root_spec};
+pub(crate) use registry::BoundCommand;
 mod filters;
 mod general;
 mod generic_compat;
@@ -48,8 +48,13 @@ use crate::journal::{Batch, Mutation};
 use crate::protocol::Resp;
 use crate::storage::{Payload, Store};
 use scan::{ScanIndex, stable_hash};
+use strings::{StringBuffer, StringValue, StringWrite};
 
 const ACTIVE_EXPIRATION_BATCH: usize = 128;
+
+/// Keys a command reads or writes, in key-specification order. Common one to
+/// four key commands stay inline; larger dynamic extractions spill to the heap.
+pub type AccessedKeys = smallvec::SmallVec<[Bytes; 4]>;
 
 /// Account for logical body bytes as well as materialized response rows. Keeping
 /// this separate from wire encoding also covers RESP3's compact semantic variants.
@@ -173,11 +178,11 @@ fn payload_replies<'a>(
 }
 
 enum Value {
-    String(Bytes),
+    String(StringValue),
     List(VecDeque<Payload>),
-    Set(sets::SetValue),
-    Hash(hashes::HashValue),
-    SortedSet(sorted_sets::SortedSetValue),
+    Set(Box<sets::SetValue>),
+    Hash(Box<hashes::HashValue>),
+    SortedSet(Box<sorted_sets::SortedSetValue>),
     Queue(Box<crate::queue::Queue>),
     Typed(Box<typed::Data>),
 }
@@ -193,6 +198,16 @@ impl AccessMetadata {
         Self {
             last_access_ms: now,
             frequency: 5,
+        }
+    }
+
+    /// The one access rule: a first access initializes, later ones count.
+    fn touch(&mut self, now: i64) {
+        if self.last_access_ms == 0 {
+            *self = Self::new(now);
+        } else {
+            self.last_access_ms = now;
+            self.frequency = self.frequency.saturating_add(1);
         }
     }
 }
@@ -283,7 +298,10 @@ pub enum GlobalCommand {
 }
 
 /// The actor owns this module, so an entire command runs without interleaving.
-/// Every expiring entry has exactly one matching expiration-index record.
+/// Every expiring entry has exactly one matching expiration-index record, every
+/// hash with field deadlines has its earliest one in `hash_expirations`, and
+/// every hash with retained fields is in `retained_hashes`. `discard_expired`
+/// relies on these indexes to skip its entry probe when no expiry state exists.
 pub struct Engine {
     entries: HashMap<Bytes, Entry>,
     held_entries: HashMap<Bytes, Entry>,
@@ -330,7 +348,6 @@ enum Command {
     Ping,
     Echo,
     Quit,
-    Get,
     Set,
     Del,
     Exists,
@@ -375,11 +392,24 @@ enum Command {
     Connection,
     Scripting,
     Maintenance,
-    Execution,
 }
 
 type CommandHandler = fn(&mut Engine, &[Bytes], i64) -> Resp;
 type ExecutionHandler = fn(&mut Engine, &[Bytes], i64) -> Execution;
+/// Builds the reply from the expiry-prepared entry named by `args[1]`;
+/// it cannot change the engine.
+type ReadHandler = fn(Option<&Value>, &[Bytes]) -> Resp;
+
+/// How a registration runs.
+#[derive(Clone, Copy)]
+enum Handler {
+    /// Built-in semantics selected by [`Command`].
+    Builtin,
+    Reply(CommandHandler),
+    Execution(ExecutionHandler),
+    /// A pure single-entry read; see [`Engine::read_entry`].
+    Read(ReadHandler),
+}
 
 #[derive(Clone, Copy)]
 struct CommandSpec {
@@ -392,8 +422,9 @@ struct CommandSpec {
     flags: &'static [&'static str],
     // Legacy COMMAND positions, including negative last-key positions.
     keys: (i64, i64, i64),
-    handler: Option<CommandHandler>,
-    execution_handler: Option<ExecutionHandler>,
+    // Compiled key specifications; the registry indexes its copies at startup.
+    key_table: key_specs::KeyTable,
+    handler: Handler,
 }
 
 impl CommandSpec {
@@ -412,8 +443,8 @@ impl CommandSpec {
             pairs: false,
             flags,
             keys,
-            handler: None,
-            execution_handler: None,
+            key_table: key_specs::KeyTable::Unindexed,
+            handler: Handler::Builtin,
         }
     }
 
@@ -432,8 +463,8 @@ impl CommandSpec {
             pairs: false,
             flags,
             keys,
-            handler: Some(handler),
-            execution_handler: None,
+            key_table: key_specs::KeyTable::Unindexed,
+            handler: Handler::Reply(handler),
         }
     }
 
@@ -445,15 +476,36 @@ impl CommandSpec {
         handler: fn(&mut Engine, &[Bytes], i64) -> Execution,
     ) -> Self {
         Self {
-            command: Command::Execution,
+            command: Command::Extension,
             name,
             arity,
             max_arity: None,
             pairs: false,
             flags,
             keys,
-            handler: None,
-            execution_handler: Some(handler),
+            key_table: key_specs::KeyTable::Unindexed,
+            handler: Handler::Execution(handler),
+        }
+    }
+
+    /// Registered keys must be exactly `args[1]` (checked at registry startup).
+    const fn read(
+        name: &'static str,
+        arity: i64,
+        flags: &'static [&'static str],
+        keys: (i64, i64, i64),
+        handler: ReadHandler,
+    ) -> Self {
+        Self {
+            command: Command::Extension,
+            name,
+            arity,
+            max_arity: None,
+            pairs: false,
+            flags,
+            keys,
+            key_table: key_specs::KeyTable::Unindexed,
+            handler: Handler::Read(handler),
         }
     }
 
@@ -479,7 +531,7 @@ impl CommandSpec {
     }
 
     fn key_positions(&self, args: &[Bytes]) -> Result<Option<key_specs::KeyPositions>, Resp> {
-        if let Some(result) = key_specs::compiled(self.name, args) {
+        if let Some(result) = key_specs::compiled(self.name, self.key_table, args) {
             return result;
         }
         let count = args.len();
@@ -697,7 +749,7 @@ static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new(Command::Ping, "ping", -1, &["fast"], NO_KEYS).max(2),
     CommandSpec::new(Command::Echo, "echo", 2, &["fast"], NO_KEYS),
     CommandSpec::new(Command::Quit, "quit", 1, &["fast"], NO_KEYS),
-    CommandSpec::new(Command::Get, "get", 2, &["readonly", "fast"], ONE_KEY),
+    CommandSpec::read("get", 2, &["readonly", "fast"], ONE_KEY, Engine::string_get),
     CommandSpec::new(Command::Set, "set", -3, &["write", "denyoom"], ONE_KEY),
     CommandSpec::new(Command::Del, "del", -2, &["write"], ALL_KEYS),
     CommandSpec::new(
@@ -1118,9 +1170,7 @@ impl Engine {
     pub(crate) fn take_failure(&mut self) -> Option<io::Error> {
         self.failure.take()
     }
-    pub(crate) fn is_readonly(args: &[Bytes]) -> bool {
-        effective_spec(args).is_some_and(|spec| spec.flags.contains(&"readonly"))
-    }
+    #[inline]
     pub(crate) fn finish_pending_search(&mut self) {
         if self.pending_batch.is_none() && self.pending_search.is_empty() {
             return;
@@ -1230,6 +1280,11 @@ impl Engine {
         }
         self.command_session = session;
     }
+    /// Detaches the command's session for a holder that clears the command
+    /// identity next (`set_command_session(None)`), without another reference.
+    pub(crate) fn take_command_session(&mut self) -> Option<Arc<crate::session::ClientSession>> {
+        self.command_session.take()
+    }
     pub(crate) fn set_command_acl_context(&mut self, context: &'static str) {
         self.command_acl_context = context;
     }
@@ -1248,8 +1303,8 @@ impl Engine {
         self.command_version = version;
     }
 
-    pub(crate) fn set_command_name(&mut self, args: &[Bytes]) {
-        self.command_name = effective_spec(args).map_or("", |spec| spec.name);
+    pub(crate) fn set_command_name(&mut self, command: &BoundCommand<'_>) {
+        self.command_name = command.name();
     }
 
     pub(super) fn command_version(&self) -> crate::protocol::Version {
@@ -1302,198 +1357,6 @@ impl Engine {
                 | "ts.querylabels"
                 | "ts.info"
         )
-    }
-
-    pub fn routing(args: &[Bytes], shard_count: usize) -> Routing {
-        let local_error = || Routing::Local {
-            shard: 0,
-            ready: None,
-        };
-        let Some(spec) = effective_spec(args) else {
-            return local_error();
-        };
-        let root = root_spec(args).expect("effective command has a root");
-        if !spec.accepts(args.len()) {
-            return local_error();
-        }
-        let latest_start = match spec.name {
-            "ts.get" => Some(2),
-            "ts.range" | "ts.revrange" => Some(4),
-            "ts.nrange" | "ts.nrevrange" => args
-                .get(1)
-                .and_then(|value| integer(value))
-                .and_then(|count| usize::try_from(count).ok())
-                .and_then(|count| count.checked_add(4)),
-            _ => None,
-        };
-        if latest_start
-            .and_then(|start| args.get(start..))
-            .is_some_and(|options| {
-                options
-                    .iter()
-                    .any(|value| value.eq_ignore_ascii_case(b"LATEST"))
-            })
-        {
-            return Routing::All;
-        }
-        if root.command == Command::Scripting {
-            return Routing::Scripting;
-        }
-        if root.command == Command::Maintenance {
-            return Routing::Maintenance;
-        }
-        let global = match spec.name {
-            "scan" => Some(GlobalCommand::Scan),
-            "keys" => Some(GlobalCommand::Keys),
-            "dbsize" => Some(GlobalCommand::Dbsize),
-            "randomkey" => Some(GlobalCommand::RandomKey),
-            "flushdb" | "flushall" => Some(GlobalCommand::Flush),
-            _ => None,
-        };
-        if let Some(global) = global {
-            return Routing::Global(global);
-        }
-        if Self::requires_all_keys(spec.name)
-            || spec.name.starts_with("ft.")
-            || matches!(spec.name, "copy" | "move" | "swapdb" | "sort" | "sort_ro")
-        {
-            return Routing::All;
-        }
-        let Ok(Some(positions)) = spec.key_positions(args) else {
-            return local_error();
-        };
-        let first = positions
-            .clone()
-            .next()
-            .expect("nonempty key specification");
-        let shard = Self::shard_for(&args[first], shard_count);
-        let ready = match spec.command {
-            Command::Lpush | Command::Rpush | Command::Lpushx | Command::Rpushx => {
-                Some(args[1].clone())
-            }
-            Command::Rename | Command::Renamenx | Command::Lmove | Command::Blmove => {
-                Some(args[2].clone())
-            }
-            _ if spec.name == "xadd" => Some(args[1].clone()),
-            _ => None,
-        };
-        if !spec.flags.contains(&"blocking")
-            && !matches!(
-                spec.command,
-                Command::Blpop | Command::Brpop | Command::Blmove
-            )
-            && !matches!(spec.name, "xread" | "xreadgroup" | "ts.read")
-            && positions
-                .clone()
-                .all(|index| Self::shard_for(&args[index], shard_count) == shard)
-        {
-            Routing::Local { shard, ready }
-        } else {
-            Routing::Coordinated {
-                keys: positions.map(|index| args[index].clone()).collect(),
-                ready,
-            }
-        }
-    }
-
-    pub fn accessed_keys(args: &[Bytes]) -> Vec<Bytes> {
-        effective_spec(args)
-            .and_then(|spec| spec.key_positions(args).ok().flatten())
-            .map(|positions| positions.map(|index| args[index].clone()).collect())
-            .unwrap_or_default()
-    }
-
-    pub fn any_accessed_key(args: &[Bytes], mut predicate: impl FnMut(&Bytes) -> bool) -> bool {
-        effective_spec(args).is_some_and(|spec| {
-            Self::requires_all_keys(spec.name)
-                || spec
-                    .key_positions(args)
-                    .ok()
-                    .flatten()
-                    .is_some_and(|mut positions| positions.any(|index| predicate(&args[index])))
-        })
-    }
-
-    /// Validate command identity and arity without executing counted-key parsing.
-    pub fn validate_admission(args: &[Bytes]) -> Result<(), Resp> {
-        let Some(root) = root_spec(args) else {
-            return Err(error(if args.is_empty() {
-                "ERR empty command"
-            } else {
-                "ERR unknown command"
-            }));
-        };
-        if !root.accepts(args.len()) {
-            return Err(wrong_arity(root.name));
-        }
-        let spec = effective_spec(args).expect("registered root command");
-        if spec.name == root.name
-            && registry::is_container(root.name)
-            && args.len() > 1
-            && !(args.len() == 2 && args[1].eq_ignore_ascii_case(b"HELP"))
-        {
-            return Err(error("ERR unknown subcommand"));
-        }
-        if !spec.accepts(args.len()) {
-            return Err(wrong_arity(spec.name));
-        }
-        Ok(())
-    }
-
-    pub fn validate(args: &[Bytes]) -> Result<(), Resp> {
-        Self::validate_admission(args)?;
-        let root = root_spec(args).expect("admitted command metadata");
-        let spec = effective_spec(args).expect("admitted command metadata");
-        spec.key_positions(args)?;
-        if spec.name != root.name {
-            root.key_positions(args)?;
-        }
-        Ok(())
-    }
-
-    pub fn script_allowed(args: &[Bytes]) -> bool {
-        effective_spec(args).is_some_and(|spec| !spec.flags.contains(&"noscript"))
-    }
-
-    pub fn transaction_allowed(args: &[Bytes]) -> bool {
-        effective_spec(args).is_some_and(|spec| !spec.flags.contains(&"no_multi"))
-    }
-
-    pub fn monitor_allowed(args: &[Bytes]) -> bool {
-        effective_spec(args).is_some_and(|spec| {
-            spec.name != "quit"
-                && !spec.flags.contains(&"admin")
-                && !spec.flags.contains(&"skip_monitor")
-        })
-    }
-
-    pub fn is_control(args: &[Bytes]) -> bool {
-        root_spec(args).is_some_and(|spec| {
-            matches!(
-                spec.command,
-                Command::Ping
-                    | Command::Echo
-                    | Command::Quit
-                    | Command::Select
-                    | Command::Catalog
-                    | Command::Connection
-                    | Command::Publish
-                    | Command::Maintenance
-            ) || spec.name == "script"
-        })
-    }
-
-    pub fn is_dataset_write(args: &[Bytes]) -> bool {
-        effective_spec(args).is_some_and(|spec| {
-            spec.command != Command::Maintenance
-                && (spec.flags.contains(&"write")
-                    || matches!(spec.name, "eval" | "evalsha" | "fcall"))
-        })
-    }
-
-    pub fn is_pause_write(args: &[Bytes]) -> bool {
-        Self::is_dataset_write(args)
-            || effective_spec(args).is_some_and(|spec| spec.flags.contains(&"may_replicate"))
     }
 
     pub fn watch_deadline(&mut self, key: &Bytes, now: i64) -> Option<i64> {
@@ -1698,7 +1561,7 @@ impl Engine {
                     if expires_at.is_some_and(|deadline| deadline <= now) {
                         return Err(invalid_journal());
                     }
-                    self.store_value(&key, value, expires_at);
+                    self.store_value(&key, StringWrite::Copy(&value), expires_at, false);
                 }
                 Mutation::Delete { key } => {
                     self.remove(&key);
@@ -1903,11 +1766,15 @@ impl Engine {
             }
             if self.pending_batch.is_none() {
                 self.journal_database = self.active_database;
+                // The leading database row and this first effect are both
+                // required; reserve them together instead of growing at once.
+                let mut mutations = Vec::with_capacity(2);
+                mutations.push(Mutation::SelectDatabase {
+                    database: self.active_database,
+                });
                 self.pending_batch = Some(Batch {
                     timestamp_ms: now,
-                    mutations: vec![Mutation::SelectDatabase {
-                        database: self.active_database,
-                    }],
+                    mutations,
                 });
             }
             let batch = self
@@ -1934,7 +1801,27 @@ impl Engine {
 
     /// Refresh once after a command, when every source mutation is complete.
     /// Mutation payloads are borrowed from the journal, never cloned for indexing.
+    /// With nothing queued and no index to refresh, the full pass could only
+    /// clear an empty queue, so it is skipped.
+    #[inline]
     pub(crate) fn finish_search_changes(&mut self, now: i64) {
+        if self.pending_search.is_empty() && !self.search_indexing() {
+            return;
+        }
+        self.refresh_search_changes(now);
+    }
+
+    /// An index may consume this engine's mutations.
+    #[inline]
+    fn search_indexing(&self) -> bool {
+        self.search_reindexing
+            && self
+                .search
+                .as_ref()
+                .is_some_and(|catalog| catalog.has_indexes())
+    }
+
+    fn refresh_search_changes(&mut self, now: i64) {
         if self
             .pending_batch
             .as_ref()
@@ -1994,14 +1881,18 @@ impl Engine {
         }
     }
 
-    pub fn execute(&mut self, args: &[Bytes]) -> io::Result<Execution> {
-        self.execute_at_time(args, unix_milliseconds())
+    /// Runs `command`, validating it fully first unless it already checked.
+    pub fn execute(&mut self, command: &mut BoundCommand<'_>) -> io::Result<Execution> {
+        self.execute_at_time(command, unix_milliseconds())
     }
 
-    pub fn execute_at_time(&mut self, args: &[Bytes], now: i64) -> io::Result<Execution> {
+    pub fn execute_at_time(
+        &mut self,
+        command: &mut BoundCommand<'_>,
+        now: i64,
+    ) -> io::Result<Execution> {
         debug_assert!(self.failure.is_none(), "execution failures are fatal");
-        let execution = self.execution_at(args, now);
-        self.finish_search_changes(now);
+        let execution = self.execution_at(command, now);
         match self.failure.take() {
             Some(error) => Err(error),
             None => Ok(execution),
@@ -2080,7 +1971,7 @@ impl Engine {
 
     #[cfg(test)]
     fn execute_at(&mut self, args: &[Bytes], now: i64) -> Resp {
-        match self.execution_at(args, now) {
+        match self.execution_at(&mut BoundCommand::bind(args), now) {
             Execution::Reply(reply) | Execution::Pushed { reply, .. } => reply,
             Execution::Block(_) | Execution::StreamBlock(_) => {
                 panic!("blocking commands require the execution interface")
@@ -2088,15 +1979,62 @@ impl Engine {
         }
     }
 
-    fn execution_at(&mut self, args: &[Bytes], now: i64) -> Execution {
-        self.prepare_replay_args(args);
-        let execution = self.execution_inner(args, now);
+    fn execution_at(&mut self, command: &mut BoundCommand<'_>, now: i64) -> Execution {
+        debug_assert!(
+            self.pending_batch.is_none(),
+            "drain the previous journal batch"
+        );
+        self.prepare_replay_args(command);
+        let execution = match command.check() {
+            Ok(()) => match command
+                .root_spec()
+                .expect("checked command is registered")
+                .handler
+            {
+                // Replay keeps its wall-clock touch after search changes, below.
+                Handler::Read(read) if !self.replication_replay => {
+                    self.set_command_name(command);
+                    let reply = self.read_entry(read, command.args(), now);
+                    // Search refreshes only read entries (and restore any
+                    // database they select), so the access already recorded
+                    // is exactly the one the final pass would record.
+                    self.finish_search_changes(now);
+                    return Execution::Reply(reply);
+                }
+                _ => self.execution_inner(command, now),
+            },
+            Err(reply) => Execution::Reply(reply),
+        };
         self.finish_search_changes(now);
-        self.finish_access_metadata(args, now);
+        self.finish_access_metadata(command, now);
         execution
     }
 
-    fn finish_access_metadata(&mut self, args: &[Bytes], now: i64) {
+    /// Runs a pure single-entry read of `args[1]`: expiry is discarded exactly
+    /// as [`Self::value`] does, and one entry borrow both builds the reply and
+    /// records the access, which therefore skips the final access pass.
+    fn read_entry(&mut self, read: ReadHandler, args: &[Bytes], now: i64) -> Resp {
+        let key = &args[1];
+        self.discard_expired(key, now);
+        let touch = !self.no_touch();
+        match self.entries.get_mut(key) {
+            Some(entry) => {
+                let reply = read(Some(&entry.value), args);
+                if touch {
+                    entry.access.touch(now);
+                }
+                reply
+            }
+            None => read(None, args),
+        }
+    }
+
+    /// Touch the effective command's keys: the positions validation already
+    /// found, or those still parseable when validation rejected the command.
+    /// A fixed single key is the only such position whenever it is present,
+    /// so it is touched without building the general position iterator.
+    fn finish_access_metadata(&mut self, command: &BoundCommand<'_>, now: i64) {
+        let args = command.args();
         if args.first().is_some_and(|name| {
             [b"OBJECT".as_slice(), b"RESTORE", b"RESTORE-ASKING"]
                 .iter()
@@ -2104,21 +2042,26 @@ impl Engine {
         }) {
             return;
         }
-        if let Some(spec) = effective_spec(args)
-            && let Ok(Some(positions)) = spec.key_positions(args)
-        {
-            for position in positions {
-                self.touch_key_access(&args[position], now);
+        if let Some(position) = command.fixed_key() {
+            if let Some(key) = args.get(position) {
+                self.touch_key_access(key, now);
             }
+            return;
+        }
+        for position in command.access_positions().into_iter().flatten() {
+            self.touch_key_access(&args[position], now);
         }
     }
 
-    fn touch_key_access(&mut self, key: &Bytes, now: i64) {
-        if self
-            .command_session
+    /// CLIENT NO-TOUCH, read live at each access.
+    fn no_touch(&self) -> bool {
+        self.command_session
             .as_ref()
             .is_some_and(|session| session.no_touch.load(std::sync::atomic::Ordering::Acquire))
-        {
+    }
+
+    fn touch_key_access(&mut self, key: &Bytes, now: i64) {
+        if self.no_touch() {
             return;
         }
         let now = if self.replication_replay {
@@ -2127,37 +2070,28 @@ impl Engine {
             now
         };
         if let Some(entry) = self.entries.get_mut(key) {
-            if entry.access.last_access_ms == 0 {
-                entry.access = AccessMetadata::new(now);
-            } else {
-                entry.access.last_access_ms = now;
-                entry.access.frequency = entry.access.frequency.saturating_add(1);
-            }
+            entry.access.touch(now);
         }
     }
 
-    fn execution_inner(&mut self, args: &[Bytes], now: i64) -> Execution {
-        debug_assert!(
-            self.pending_batch.is_none(),
-            "drain the previous journal batch"
-        );
-        if let Err(reply) = Self::validate(args) {
-            return Execution::Reply(reply);
-        }
-        let spec = root_spec(args).expect("validated command root");
-        self.set_command_name(args);
+    fn execution_inner(&mut self, command: &BoundCommand<'_>, now: i64) -> Execution {
+        self.set_command_name(command);
+        let args = command.args();
+        let spec = command.root_spec().expect("checked command is registered");
         if spec.name == "ts.read" {
             return self.timeseries_read(args, now, false);
         }
         if matches!(spec.name, "xread" | "xreadgroup") {
             return self.stream_read(args, now);
         }
+        match spec.handler {
+            Handler::Builtin => {}
+            Handler::Reply(handler) => return Execution::Reply(handler(self, args, now)),
+            Handler::Execution(handler) => return handler(self, args, now),
+            // Only replay reaches here; `execution_at` runs the others.
+            Handler::Read(read) => return Execution::Reply(read(self.value(&args[1], now), args)),
+        }
         match spec.command {
-            Command::Execution => {
-                (spec
-                    .execution_handler
-                    .expect("registered execution handler"))(self, args, now)
-            }
             Command::Blpop | Command::Brpop => {
                 self.blocking_pop(args, spec.command == Command::Brpop, now)
             }
@@ -2200,11 +2134,6 @@ impl Engine {
             },
             Command::Echo => Resp::Bulk(Some(args[1].clone())),
             Command::Quit => Resp::Simple("OK"),
-            Command::Get => match self.value(&args[1], now) {
-                Some(Value::String(value)) => Resp::Bulk(Some(value.clone())),
-                Some(_) => wrong_type(),
-                None => Resp::Bulk(None),
-            },
             Command::Set => self.set(args, now),
             Command::Del => {
                 let mut count = 0;
@@ -2230,7 +2159,7 @@ impl Engine {
                 bounded_replies(
                     args[1..].iter().map(|key| {
                         Resp::Bulk(match self.value(key, now) {
-                            Some(Value::String(value)) => Some(value.clone()),
+                            Some(Value::String(value)) => Some(value.bytes().clone()),
                             _ => None,
                         })
                     }),
@@ -2240,7 +2169,7 @@ impl Engine {
             Command::Mset => {
                 // The registry validates the entire key/value shape before any write.
                 for pair in args[1..].as_chunks::<2>().0 {
-                    self.store(&pair[0], pair[1].clone(), None, now);
+                    self.store(&pair[0], StringWrite::Copy(&pair[1]), None, now);
                 }
                 Resp::Simple("OK")
             }
@@ -2354,9 +2283,6 @@ impl Engine {
             Command::Connection | Command::Publish | Command::Scripting | Command::Maintenance => {
                 error("ERR command requires its execution context")
             }
-            Command::Extension => {
-                (spec.handler.expect("registered command handler"))(self, args, now)
-            }
             Command::Lpush
             | Command::Rpush
             | Command::Blpop
@@ -2369,7 +2295,8 @@ impl Engine {
             | Command::Renamenx
             | Command::Lpushx
             | Command::Rpushx
-            | Command::Execution
+            // Registrations without built-in semantics run their `Handler`.
+            | Command::Extension
             | Command::CatalogCount => unreachable!(),
         }
     }
@@ -2558,30 +2485,40 @@ impl Engine {
         };
         let key = &args[1];
         self.discard_expired(key, now);
-        let existing = self.entries.get(key);
-        let previous = if options.get {
-            match existing.map(|entry| &entry.value) {
-                Some(Value::String(value)) => Some(value.clone()),
-                Some(_) => return wrong_type(),
-                None => None,
-            }
-        } else {
-            None
-        };
-        match options
-            .condition
-            .matches(existing.map(|entry| &entry.value))
+        let (previous, deadline) = if !options.get
+            && !options.keep_ttl
+            && matches!(options.condition, string_compat::SetCondition::Always)
         {
-            Ok(true) => {}
-            Ok(false) => return Resp::Bulk(previous),
-            Err(reply) => return reply,
-        }
-        let deadline = if options.keep_ttl {
-            existing.and_then(|entry| entry.expires_at)
+            // Nothing reads the replaced entry: `store` alone resolves its
+            // lifecycle, including held images and an elapsed new deadline.
+            (None, options.deadline)
         } else {
-            options.deadline
+            let existing = self.entries.get(key);
+            let previous = if options.get {
+                match existing.map(|entry| &entry.value) {
+                    Some(Value::String(value)) => Some(value.bytes().clone()),
+                    Some(_) => return wrong_type(),
+                    None => None,
+                }
+            } else {
+                None
+            };
+            match options
+                .condition
+                .matches(existing.map(|entry| &entry.value))
+            {
+                Ok(true) => {}
+                Ok(false) => return Resp::Bulk(previous),
+                Err(reply) => return reply,
+            }
+            let deadline = if options.keep_ttl {
+                existing.and_then(|entry| entry.expires_at)
+            } else {
+                options.deadline
+            };
+            (previous, deadline)
         };
-        self.store(key, args[2].clone(), deadline, now);
+        self.store(key, StringWrite::Copy(&args[2]), deadline, now);
         if options.get {
             Resp::Bulk(previous)
         } else {
@@ -2591,22 +2528,45 @@ impl Engine {
 
     fn increment(&mut self, key: &Bytes, delta: i64, now: i64) -> Resp {
         self.discard_expired(key, now);
-        let (old, deadline) = match self.entries.get(key) {
+        let capture = self.capturing_changes();
+        let (value, deadline) = match self.entries.get_mut(key) {
             Some(Entry {
-                value: Value::String(value),
+                value: Value::String(string),
                 expires_at,
                 ..
-            }) => match integer(value) {
-                Some(value) => (value, *expires_at),
-                None => return integer_error(),
-            },
+            }) => {
+                let Some(old) = integer(string.bytes()) else {
+                    return integer_error();
+                };
+                let Some(value) = old.checked_add(delta) else {
+                    return error("ERR increment or decrement would overflow");
+                };
+                let deadline = *expires_at;
+                // For a live string whose key has no held image or retained
+                // marker, `store` resolves nothing: the deadline and its index
+                // row, access metadata and key stay. Rewrite it in place. Other
+                // states (an elapsed deadline kept by replay, a held image or
+                // marker beside a live entry) take `store` below.
+                if deadline.is_none_or(|deadline| deadline > now)
+                    && (self.held_entries.is_empty() || !self.held_entries.contains_key(key))
+                    && (self.retained_hashes.is_empty() || !self.retained_hashes.contains(key))
+                {
+                    if let Some(resolved) = string.apply(StringWrite::Integer(value), capture) {
+                        self.record(now, || Mutation::Set {
+                            key: key.clone(),
+                            value: resolved,
+                            expires_at: deadline,
+                        });
+                    }
+                    return Resp::Integer(value);
+                }
+                (value, deadline)
+            }
             Some(_) => return wrong_type(),
-            None => (0, None),
+            // A missing key counts from zero, which cannot overflow.
+            None => (delta, None),
         };
-        let Some(value) = old.checked_add(delta) else {
-            return error("ERR increment or decrement would overflow");
-        };
-        self.store(key, Bytes::from(value.to_string()), deadline, now);
+        self.store(key, StringWrite::Integer(value), deadline, now);
         Resp::Integer(value)
     }
 
@@ -2672,7 +2632,7 @@ impl Engine {
         self.entries.get(key).map(|entry| &entry.value)
     }
 
-    fn store(&mut self, key: &Bytes, value: Bytes, deadline: Option<i64>, now: i64) {
+    fn store(&mut self, key: &Bytes, write: StringWrite<'_>, deadline: Option<i64>, now: i64) {
         self.resolve_held_write(key, now);
         if deadline.is_some_and(|deadline| deadline <= now) {
             if self.remove(key).is_some() {
@@ -2680,24 +2640,44 @@ impl Engine {
             }
             return;
         }
-        self.store_value(key, value.clone(), deadline);
-        self.record(now, || Mutation::Set {
-            key: key.clone(),
-            value: value.clone(),
-            expires_at: deadline,
-        });
+        let capture = self.capturing_changes();
+        if let Some(value) = self.store_value(key, write, deadline, capture) {
+            self.record(now, || Mutation::Set {
+                key: key.clone(),
+                value,
+                expires_at: deadline,
+            });
+        }
     }
 
-    fn store_value(&mut self, key: &Bytes, value: Bytes, deadline: Option<i64>) {
-        self.held_entries.remove(key);
+    /// Places a string without journaling. With `capture`, returns the bytes
+    /// the caller's resolved `Mutation::Set` must carry.
+    fn store_value(
+        &mut self,
+        key: &Bytes,
+        write: StringWrite<'_>,
+        deadline: Option<i64>,
+        capture: bool,
+    ) -> Option<Bytes> {
+        if !self.held_entries.is_empty() {
+            self.held_entries.remove(key);
+        }
         self.retained_hashes.remove(key);
-        if let Some(deadline) = self.hash_deadline(key) {
-            self.hash_expirations.remove(&(deadline, key.clone()));
-        }
-        if let Some(deadline) = self.queue_deadline(key) {
-            self.queue_expirations.remove(&(deadline, key.clone()));
-        }
         if let Some(entry) = self.entries.get_mut(key) {
+            // The replaced value's internal deadlines leave their indexes.
+            match &entry.value {
+                Value::Hash(hash) => {
+                    if let Some(deadline) = hash.next_expiry() {
+                        self.hash_expirations.remove(&(deadline, key.clone()));
+                    }
+                }
+                Value::Queue(queue) => {
+                    if let Some(deadline) = queue.next_deadline() {
+                        self.queue_expirations.remove(&(deadline, key.clone()));
+                    }
+                }
+                _ => {}
+            }
             if entry.expires_at != deadline {
                 if let Some(previous) = entry.expires_at {
                     self.expirations.remove(&(previous, key.clone()));
@@ -2706,9 +2686,18 @@ impl Engine {
                     self.expirations.insert((deadline, key.clone()));
                 }
             }
-            entry.value = Value::String(value);
+            let resolved = match &mut entry.value {
+                Value::String(value) => value.apply(write, capture),
+                replaced => {
+                    let (value, resolved) = StringValue::new(write, capture);
+                    *replaced = Value::String(value);
+                    resolved
+                }
+            };
             entry.expires_at = deadline;
+            resolved
         } else {
+            let (value, resolved) = StringValue::new(write, capture);
             self.insert_entry_raw(
                 self.own_key(key),
                 Entry {
@@ -2717,6 +2706,7 @@ impl Engine {
                     access: crate::engine::AccessMetadata::default(),
                 },
             );
+            resolved
         }
     }
 
@@ -2749,13 +2739,49 @@ impl Engine {
         if self.replication_replay {
             return;
         }
-        self.release_unheld_key(key, now);
-        if self
-            .entries
-            .get(key)
-            .and_then(|entry| entry.expires_at)
-            .is_some_and(|deadline| deadline <= now)
+        // These indexes are complete (see `Engine`): with no held image, key
+        // deadline, field deadline or retained field, no branch below has work.
+        if self.held_entries.is_empty()
+            && self.expirations.is_empty()
+            && self.hash_expirations.is_empty()
+            && self.retained_hashes.is_empty()
         {
+            debug_assert!(
+                self.entries.get(key).is_none_or(|entry| {
+                    entry.expires_at.is_none()
+                        && match &entry.value {
+                            Value::Hash(hash) => {
+                                !hash.has_retained_fields() && hash.next_expiry().is_none()
+                            }
+                            _ => true,
+                        }
+                }),
+                "expiry indexes must cover every deadline and retained field"
+            );
+            return;
+        }
+        if !self.held_entries.is_empty() {
+            self.release_unheld_key(key, now);
+        }
+        // One probe decides which housekeeping can apply. Values that are not
+        // hashes, and hashes with neither retained nor due fields, have nothing
+        // for `prune_hash_fields` to do beyond clearing a retained marker.
+        let (expired, hash_work) = match self.entries.get(key) {
+            None => (false, false),
+            Some(entry) if entry.expires_at.is_some_and(|deadline| deadline <= now) => {
+                (true, false)
+            }
+            Some(Entry {
+                value: Value::Hash(hash),
+                ..
+            }) => (
+                false,
+                hash.has_retained_fields()
+                    || hash.next_expiry().is_some_and(|deadline| deadline <= now),
+            ),
+            Some(_) => (false, false),
+        };
+        if expired {
             if self.holding_expiry(key) {
                 if let Some((key, entry)) = self.detach_entry(key) {
                     self.held_entries.insert(key, entry);
@@ -2763,9 +2789,11 @@ impl Engine {
             } else if self.remove(key).is_some() {
                 self.record(now, || Mutation::Delete { key: key.clone() });
             }
-            return;
+        } else if hash_work {
+            self.prune_hash_fields(key, now, usize::MAX);
+        } else if !self.retained_hashes.is_empty() && !self.holding_expiry(key) {
+            self.retained_hashes.remove(key);
         }
-        self.prune_hash_fields(key, now, usize::MAX);
     }
 
     fn expire_at(&mut self, now: i64, limit: usize) {
@@ -2825,10 +2853,18 @@ impl Engine {
     }
 
     fn refresh_hash_deadline(&mut self, key: &Bytes, previous: Option<i64>) {
+        let next = self.hash_deadline(key);
+        self.refresh_hash_deadline_to(key, previous, next);
+    }
+
+    /// Replace `key`'s hash-expiration index row when the caller already knows
+    /// the hash's next field deadline. No equality shortcut: another operation
+    /// may have removed the previous row, so `next` is always reinserted.
+    fn refresh_hash_deadline_to(&mut self, key: &Bytes, previous: Option<i64>, next: Option<i64>) {
         if let Some(deadline) = previous {
             self.hash_expirations.remove(&(deadline, key.clone()));
         }
-        if let Some(deadline) = self.hash_deadline(key) {
+        if let Some(deadline) = next {
             self.hash_expirations.insert((deadline, key.clone()));
         }
     }
@@ -2841,7 +2877,9 @@ impl Engine {
 
     /// Structural transfer and resolved replay only; never invent durable effects.
     fn insert_entry_raw(&mut self, key: Bytes, entry: Entry) {
-        self.held_entries.remove(&key);
+        if !self.held_entries.is_empty() {
+            self.held_entries.remove(&key);
+        }
         self.retained_hashes.remove(&key);
         if matches!(&entry.value, Value::Hash(hash) if hash.has_retained_fields()) {
             self.retained_hashes.insert(key.clone());
@@ -3029,6 +3067,12 @@ mod tests {
                     vec!["LPUSH", "k", "new"],
                     vec!["LRANGE", "k", "0", "-1"],
                 ),
+                (
+                    vec!["SET", "k", "old"],
+                    vec!["SET", "k", "new"],
+                    vec!["GET", "k"],
+                ),
+                (vec!["SET", "k", "41"], vec!["INCR", "k"], vec!["GET", "k"]),
                 (
                     vec!["HSET", "k", "old", "old"],
                     vec!["HSET", "k", "new", "new"],
@@ -3257,6 +3301,47 @@ mod tests {
             &[b"old"],
         );
         assert_integer(run(&mut recovered, 1012, &["PTTL", "k"]), -1);
+    }
+
+    #[test]
+    fn reads_release_held_expiry_once_after_holds_end() {
+        for promotion in [false, true] {
+            let mut engine = journaled_engine();
+            run(&mut engine, 1000, &["SET", "plain", "v"]);
+            engine.take_batch();
+            run(&mut engine, 1000, &["SET", "k", "v", "PX", "10"]);
+            engine.take_batch();
+            if promotion {
+                engine.set_replica_mode(true);
+            } else {
+                engine.set_migration_expiry_ranges(Some(&[(0, 16383)]));
+            }
+            assert_bulk(run(&mut engine, 1010, &["GET", "k"]), None);
+            assert!(
+                engine.take_batch().is_none(),
+                "held expiry belongs to the source"
+            );
+            if promotion {
+                engine.set_replica_mode(false);
+            } else {
+                engine.set_migration_expiry_ranges(None);
+            }
+            // Only the held image remains: no key or field deadline is indexed.
+            assert_bulk(run(&mut engine, 1011, &["GET", "plain"]), Some(b"v"));
+            assert!(
+                engine.take_batch().is_none(),
+                "reading another key leaves the held image"
+            );
+            assert_bulk(run(&mut engine, 1011, &["GET", "k"]), None);
+            let released = engine.take_batch().expect("released held deletion");
+            assert!(released.mutations.iter().any(|mutation| matches!(
+                mutation,
+                Mutation::Delete { key } if key.as_ref() == b"k"
+            )));
+            assert_bulk(run(&mut engine, 1012, &["GET", "k"]), None);
+            assert_integer(run(&mut engine, 1012, &["EXISTS", "k"]), 0);
+            assert!(engine.take_batch().is_none(), "released exactly once");
+        }
     }
 
     #[test]
@@ -3495,7 +3580,11 @@ mod tests {
             .into_iter()
             .map(|arg| Bytes::from_static(arg.as_bytes()))
             .collect();
-        assert!(engine.execute_at_time(&args, 1000).is_err());
+        assert!(
+            engine
+                .execute_at_time(&mut BoundCommand::bind(&args), 1000)
+                .is_err()
+        );
         assert_integer(run(&mut engine, 1000, &["LLEN", "destination"]), 1);
         assert_integer(run(&mut engine, 1000, &["EXISTS", "fresh"]), 0);
         assert!(engine.take_batch().is_none());
@@ -4035,7 +4124,7 @@ mod tests {
             .iter()
             .map(|arg| Bytes::copy_from_slice(arg.as_bytes()))
             .collect();
-        engine.execution_at(&args, now)
+        engine.execution_at(&mut BoundCommand::bind(&args), now)
     }
 
     fn immediate_reply(execution: Execution) -> Resp {
@@ -4674,6 +4763,46 @@ mod tests {
     }
 
     #[test]
+    fn failed_increments_record_nothing_and_applied_ones_journal_the_key_deadline() {
+        let mut engine = journaled_engine();
+        for args in [
+            vec!["SET", "max", "9223372036854775807", "PX", "100"],
+            vec!["SET", "text", "abc", "PX", "100"],
+        ] {
+            run(&mut engine, 1000, &args);
+            engine.take_batch();
+        }
+        for args in [
+            vec!["INCR", "max"],
+            vec!["INCRBY", "max", "1"],
+            vec!["DECRBY", "max", "-1"],
+            vec!["INCR", "text"],
+            vec!["DECRBY", "text", "1"],
+        ] {
+            assert_error(run(&mut engine, 1010, &args));
+            assert!(engine.take_batch().is_none(), "{args:?} recorded a change");
+        }
+        assert_bulk(
+            run(&mut engine, 1010, &["GET", "max"]),
+            Some(b"9223372036854775807"),
+        );
+        assert_bulk(run(&mut engine, 1010, &["GET", "text"]), Some(b"abc"));
+        assert_integer(run(&mut engine, 1010, &["DECR", "max"]), i64::MAX - 1);
+        let batch = engine.take_batch().expect("journaled decrement");
+        assert!(
+            matches!(
+                batch.mutations.last(),
+                Some(Mutation::Set { key, value, expires_at: Some(1100) })
+                    if key.as_ref() == b"max" && value.as_ref() == b"9223372036854775806"
+            ),
+            "{:?}",
+            batch.mutations
+        );
+        assert_integer(run(&mut engine, 1010, &["PTTL", "max"]), 90);
+        assert_integer(run(&mut engine, 1100, &["DBSIZE"]), 0);
+    }
+
+    #[test]
     fn expiration_boundaries_units_and_ttl_rounding() {
         let mut engine = Engine::new();
         assert_integer(run(&mut engine, 1000, &["TTL", "missing"]), -2);
@@ -5000,6 +5129,11 @@ mod tests {
                 &["EVAL", "return 1", "2", "a", "b", "argument"],
                 &["a", "b"],
             ),
+            // Past the inline capacity: order and duplicates survive.
+            (
+                &["MGET", "a", "b", "a", "c", "d", "b"],
+                &["a", "b", "a", "c", "d", "b"],
+            ),
         ];
         for (command, expected) in cases {
             let args: Vec<_> = command
@@ -5007,7 +5141,7 @@ mod tests {
                 .map(|value| Bytes::copy_from_slice(value.as_bytes()))
                 .collect();
             assert_eq!(
-                Engine::accessed_keys(&args),
+                BoundCommand::bind(&args).accessed_keys().into_vec(),
                 expected
                     .iter()
                     .map(|value| Bytes::copy_from_slice(value.as_bytes()))
@@ -5024,8 +5158,108 @@ mod tests {
                 .iter()
                 .map(|value| Bytes::copy_from_slice(value.as_bytes()))
                 .collect();
-            assert!(Engine::validate(&args).is_err());
+            assert!(BoundCommand::bind(&args).check().is_err());
         }
+    }
+
+    #[test]
+    fn access_metadata_follows_effective_keys_even_when_commands_fail() {
+        let mut engine = Engine::new();
+        let key = Bytes::from_static(b"k");
+        let access = |engine: &Engine| {
+            let access = &engine.entries.get(&key).unwrap().access;
+            (access.frequency, access.last_access_ms)
+        };
+        assert_status(run(&mut engine, 1000, &["SET", "k", "v"]), "OK");
+        let (base, _) = access(&engine);
+        // An execution error after validation still touches its keys.
+        assert!(matches!(
+            run(&mut engine, 2000, &["LLEN", "k"]),
+            Resp::Error(_)
+        ));
+        assert_eq!(access(&engine), (base + 1, 2000));
+        // So does an admission error whose effective key spec still parses.
+        assert!(matches!(
+            run(&mut engine, 3000, &["GET", "k", "extra"]),
+            Resp::Error(_)
+        ));
+        assert_eq!(access(&engine), (base + 2, 3000));
+        // OBJECT never touches the key it inspects.
+        run(&mut engine, 4000, &["OBJECT", "FREQ", "k"]);
+        assert_eq!(access(&engine), (base + 2, 3000));
+    }
+
+    #[test]
+    fn writes_touch_each_accessed_key_once_by_fixed_or_parsed_positions() {
+        let mut engine = Engine::new();
+        let access = |engine: &Engine, key: &'static [u8]| {
+            let access = &engine.entries.get(&Bytes::from_static(key)).unwrap().access;
+            (access.frequency, access.last_access_ms)
+        };
+        assert_integer(run(&mut engine, 1000, &["INCR", "n"]), 1);
+        let (first, _) = access(&engine, b"n");
+        assert_integer(run(&mut engine, 2000, &["INCR", "n"]), 2);
+        assert_eq!(access(&engine, b"n"), (first + 1, 2000));
+        // A fixed-key command missing its key argument touches nothing.
+        assert_error(run(&mut engine, 3000, &["INCR"]));
+        assert_eq!(access(&engine, b"n"), (first + 1, 2000));
+        // Parsed positions touch every key once: a new key starts as `n` did.
+        assert_status(run(&mut engine, 4000, &["MSET", "a", "1", "n", "5"]), "OK");
+        assert_eq!(access(&engine, b"n"), (first + 2, 4000));
+        assert_eq!(access(&engine, b"a"), (first, 4000));
+    }
+
+    #[test]
+    fn single_entry_reads_record_access_exactly_once_and_honor_no_touch_and_replay() {
+        let mut engine = Engine::new();
+        let session = Arc::new(crate::session::ClientSession::new(1));
+        engine.set_command_session(Some(session.clone()));
+        let access = |engine: &Engine, key: &'static [u8]| {
+            let access = &engine.entries.get(&Bytes::from_static(key)).unwrap().access;
+            (access.frequency, access.last_access_ms)
+        };
+        assert_status(run(&mut engine, 1000, &["SET", "s", "v"]), "OK");
+        assert_integer(run(&mut engine, 1000, &["HSET", "h", "f", "v"]), 1);
+        let (string, _) = access(&engine, b"s");
+        let (hash, _) = access(&engine, b"h");
+        assert_bulk(run(&mut engine, 2000, &["GET", "s"]), Some(b"v"));
+        assert_eq!(access(&engine, b"s"), (string + 1, 2000));
+        assert_bulk(run(&mut engine, 2000, &["HGET", "h", "f"]), Some(b"v"));
+        assert_eq!(access(&engine, b"h"), (hash + 1, 2000));
+        // A missing field or the wrong type still reads, and touches, the key.
+        assert_bulk(run(&mut engine, 3000, &["HGET", "h", "missing"]), None);
+        assert_eq!(access(&engine, b"h"), (hash + 2, 3000));
+        assert_error(run(&mut engine, 3000, &["GET", "h"]));
+        assert_eq!(access(&engine, b"h"), (hash + 3, 3000));
+        assert_error(run(&mut engine, 3000, &["HGET", "s", "f"]));
+        assert_eq!(access(&engine, b"s"), (string + 2, 3000));
+        // CLIENT NO-TOUCH is consulted at each read, not when bound.
+        session
+            .no_touch
+            .store(true, std::sync::atomic::Ordering::Release);
+        assert_bulk(run(&mut engine, 4000, &["GET", "s"]), Some(b"v"));
+        assert_bulk(run(&mut engine, 4000, &["HGET", "h", "f"]), Some(b"v"));
+        assert_eq!(access(&engine, b"s"), (string + 2, 3000));
+        assert_eq!(access(&engine, b"h"), (hash + 3, 3000));
+        session
+            .no_touch
+            .store(false, std::sync::atomic::Ordering::Release);
+        assert_bulk(run(&mut engine, 5000, &["GET", "s"]), Some(b"v"));
+        assert_eq!(access(&engine, b"s"), (string + 3, 5000));
+        // An expired key is discarded before the read and gains no access.
+        assert_status(run(&mut engine, 5000, &["SET", "e", "v", "PX", "10"]), "OK");
+        assert_bulk(run(&mut engine, 5010, &["GET", "e"]), None);
+        assert!(!engine.entries.contains_key(&Bytes::from_static(b"e")));
+        // Replay records its read access once, on the wall clock.
+        engine.set_replication_replay(true);
+        let before = unix_milliseconds();
+        assert_bulk(run(&mut engine, 6000, &["GET", "s"]), Some(b"v"));
+        assert_bulk(run(&mut engine, 6000, &["HGET", "h", "f"]), Some(b"v"));
+        engine.set_replication_replay(false);
+        let (frequency, last) = access(&engine, b"s");
+        assert!(frequency == string + 4 && last >= before);
+        let (frequency, last) = access(&engine, b"h");
+        assert!(frequency == hash + 4 && last >= before);
     }
 
     #[test]

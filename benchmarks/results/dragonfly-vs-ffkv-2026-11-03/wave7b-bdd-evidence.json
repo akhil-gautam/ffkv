@@ -1,0 +1,2432 @@
+[
+  {
+    "command": "ARCOUNT",
+    "status": "positive",
+    "scenario": "arrays.feature:5"
+  },
+  {
+    "command": "ARGET",
+    "status": "positive",
+    "scenario": "arrays.feature:5"
+  },
+  {
+    "command": "ARGETRANGE",
+    "status": "positive",
+    "scenario": "arrays.feature:5"
+  },
+  {
+    "command": "ARINFO",
+    "status": "positive",
+    "scenario": "arrays.feature:5"
+  },
+  {
+    "command": "ARLEN",
+    "status": "positive",
+    "scenario": "arrays.feature:5"
+  },
+  {
+    "command": "ARMGET",
+    "status": "positive",
+    "scenario": "arrays.feature:5"
+  },
+  {
+    "command": "ARMSET",
+    "status": "positive",
+    "scenario": "arrays.feature:5"
+  },
+  {
+    "command": "ARSET",
+    "status": "positive",
+    "scenario": "arrays.feature:5"
+  },
+  {
+    "command": "ARDEL",
+    "status": "positive",
+    "scenario": "arrays.feature:87"
+  },
+  {
+    "command": "ARDELRANGE",
+    "status": "positive",
+    "scenario": "arrays.feature:87"
+  },
+  {
+    "command": "ARINSERT",
+    "status": "positive",
+    "scenario": "arrays.feature:134"
+  },
+  {
+    "command": "ARNEXT",
+    "status": "positive",
+    "scenario": "arrays.feature:134"
+  },
+  {
+    "command": "ARSEEK",
+    "status": "positive",
+    "scenario": "arrays.feature:134"
+  },
+  {
+    "command": "ARLASTITEMS",
+    "status": "positive",
+    "scenario": "arrays.feature:218"
+  },
+  {
+    "command": "ARRING",
+    "status": "positive",
+    "scenario": "arrays.feature:218"
+  },
+  {
+    "command": "ARGREP",
+    "status": "positive",
+    "scenario": "arrays.feature:278"
+  },
+  {
+    "command": "ARSCAN",
+    "status": "positive",
+    "scenario": "arrays.feature:278"
+  },
+  {
+    "command": "AROP",
+    "status": "positive",
+    "scenario": "arrays.feature:317"
+  },
+  {
+    "command": "EVAL",
+    "status": "positive",
+    "scenario": "arrays.feature:477"
+  },
+  {
+    "command": "PING",
+    "status": "positive",
+    "scenario": "arrays.feature:477"
+  },
+  {
+    "command": "BITCOUNT",
+    "status": "positive",
+    "scenario": "bitmaps.feature:5"
+  },
+  {
+    "command": "BITPOS",
+    "status": "positive",
+    "scenario": "bitmaps.feature:5"
+  },
+  {
+    "command": "GETBIT",
+    "status": "positive",
+    "scenario": "bitmaps.feature:5"
+  },
+  {
+    "command": "SETBIT",
+    "status": "positive",
+    "scenario": "bitmaps.feature:5"
+  },
+  {
+    "command": "EXISTS",
+    "status": "positive",
+    "scenario": "bitmaps.feature:123"
+  },
+  {
+    "command": "BITFIELD",
+    "status": "positive",
+    "scenario": "bitmaps.feature:167"
+  },
+  {
+    "command": "BITFIELD_RO",
+    "status": "positive",
+    "scenario": "bitmaps.feature:167"
+  },
+  {
+    "command": "BITOP",
+    "status": "positive",
+    "scenario": "bitmaps.feature:237"
+  },
+  {
+    "command": "GET",
+    "status": "positive",
+    "scenario": "bitmaps.feature:466"
+  },
+  {
+    "command": "LINDEX",
+    "status": "positive",
+    "scenario": "bitmaps.feature:466"
+  },
+  {
+    "command": "LPUSH",
+    "status": "positive",
+    "scenario": "bitmaps.feature:466"
+  },
+  {
+    "command": "SET",
+    "status": "positive",
+    "scenario": "bitmaps.feature:466"
+  },
+  {
+    "command": "COMMAND",
+    "status": "positive",
+    "scenario": "catalog.feature:4"
+  },
+  {
+    "command": "COMMAND COUNT",
+    "status": "positive",
+    "scenario": "catalog.feature:4"
+  },
+  {
+    "command": "COMMAND INFO",
+    "status": "positive",
+    "scenario": "catalog.feature:4"
+  },
+  {
+    "command": "COMMAND LIST",
+    "status": "positive",
+    "scenario": "catalog.feature:4"
+  },
+  {
+    "command": "COMMAND DOCS",
+    "status": "positive",
+    "scenario": "catalog.feature:47"
+  },
+  {
+    "command": "COMMAND GETKEYS",
+    "status": "positive",
+    "scenario": "catalog.feature:64"
+  },
+  {
+    "command": "COMMAND GETKEYSANDFLAGS",
+    "status": "positive",
+    "scenario": "catalog.feature:64"
+  },
+  {
+    "command": "DBSIZE",
+    "status": "positive",
+    "scenario": "catalog.feature:92"
+  },
+  {
+    "command": "FLUSHALL",
+    "status": "positive",
+    "scenario": "catalog.feature:92"
+  },
+  {
+    "command": "FLUSHDB",
+    "status": "positive",
+    "scenario": "catalog.feature:92"
+  },
+  {
+    "command": "RPUSH",
+    "status": "positive",
+    "scenario": "catalog.feature:92"
+  },
+  {
+    "command": "SELECT",
+    "status": "positive",
+    "scenario": "catalog.feature:92"
+  },
+  {
+    "command": "LRANGE",
+    "status": "positive",
+    "scenario": "catalog.feature:170"
+  },
+  {
+    "command": "PTTL",
+    "status": "positive",
+    "scenario": "catalog.feature:170"
+  },
+  {
+    "command": "SWAPDB",
+    "status": "positive",
+    "scenario": "catalog.feature:170"
+  },
+  {
+    "command": "DUMP",
+    "status": "positive",
+    "scenario": "catalog.feature:212"
+  },
+  {
+    "command": "HGET",
+    "status": "positive",
+    "scenario": "catalog.feature:212"
+  },
+  {
+    "command": "HSET",
+    "status": "positive",
+    "scenario": "catalog.feature:212"
+  },
+  {
+    "command": "RESTORE-ASKING",
+    "status": "positive",
+    "scenario": "catalog.feature:212"
+  },
+  {
+    "command": "CLIENT ID",
+    "status": "positive",
+    "scenario": "client_control_repair.feature:56"
+  },
+  {
+    "command": "CLIENT UNBLOCK",
+    "status": "positive",
+    "scenario": "client_control_repair.feature:56"
+  },
+  {
+    "command": "INFO",
+    "status": "positive",
+    "scenario": "client_control_repair.feature:56"
+  },
+  {
+    "command": "WAIT",
+    "status": "positive",
+    "scenario": "client_control_repair.feature:56"
+  },
+  {
+    "command": "WAITAOF",
+    "status": "positive",
+    "scenario": "client_control_repair.feature:94"
+  },
+  {
+    "command": "CLIENT PAUSE",
+    "status": "positive",
+    "scenario": "client_control_repair.feature:124"
+  },
+  {
+    "command": "CLIENT UNPAUSE",
+    "status": "positive",
+    "scenario": "client_control_repair.feature:124"
+  },
+  {
+    "command": "PUBLISH",
+    "status": "positive",
+    "scenario": "client_control_repair.feature:124"
+  },
+  {
+    "command": "SPUBLISH",
+    "status": "positive",
+    "scenario": "client_control_repair.feature:125"
+  },
+  {
+    "command": "PFCOUNT",
+    "status": "positive",
+    "scenario": "client_control_repair.feature:126"
+  },
+  {
+    "command": "CLIENT LIST",
+    "status": "positive",
+    "scenario": "client_control_repair.feature:172"
+  },
+  {
+    "command": "DEL",
+    "status": "positive",
+    "scenario": "client_control_repair.feature:172"
+  },
+  {
+    "command": "REPLICAOF",
+    "status": "positive",
+    "scenario": "client_control_repair.feature:172"
+  },
+  {
+    "command": "SUBSCRIBE",
+    "status": "positive",
+    "scenario": "client_control_repair.feature:210"
+  },
+  {
+    "command": "SSUBSCRIBE",
+    "status": "positive",
+    "scenario": "client_control_repair.feature:211"
+  },
+  {
+    "command": "EXEC",
+    "status": "positive",
+    "scenario": "client_control_repair.feature:214"
+  },
+  {
+    "command": "MULTI",
+    "status": "positive",
+    "scenario": "client_control_repair.feature:214"
+  },
+  {
+    "command": "SCRIPT DEBUG",
+    "status": "positive",
+    "scenario": "client_control_repair.feature:296"
+  },
+  {
+    "command": "MODULE LOAD",
+    "status": "positive",
+    "scenario": "client_control_repair.feature:340"
+  },
+  {
+    "command": "ACL LOG",
+    "status": "positive",
+    "scenario": "client_control_repair.feature:375"
+  },
+  {
+    "command": "ACL SETUSER",
+    "status": "positive",
+    "scenario": "client_control_repair.feature:375"
+  },
+  {
+    "command": "AUTH",
+    "status": "positive",
+    "scenario": "client_control_repair.feature:375"
+  },
+  {
+    "command": "FT.CREATE",
+    "status": "positive",
+    "scenario": "client_control_repair.feature:474"
+  },
+  {
+    "command": "FT._LIST",
+    "status": "positive",
+    "scenario": "client_control_repair.feature:474"
+  },
+  {
+    "command": "CLIENT TRACKING",
+    "status": "positive",
+    "scenario": "client_control_repair.feature:571"
+  },
+  {
+    "command": "SORT_RO",
+    "status": "positive",
+    "scenario": "client_control_repair.feature:571"
+  },
+  {
+    "command": "CLUSTER KEYSLOT",
+    "status": "positive",
+    "scenario": "cluster.feature:6"
+  },
+  {
+    "command": "CLUSTER MEET",
+    "status": "positive",
+    "scenario": "cluster.feature:6"
+  },
+  {
+    "command": "CLUSTER MYID",
+    "status": "positive",
+    "scenario": "cluster.feature:6"
+  },
+  {
+    "command": "CLUSTER MYSHARDID",
+    "status": "positive",
+    "scenario": "cluster.feature:6"
+  },
+  {
+    "command": "CLUSTER NODES",
+    "status": "positive",
+    "scenario": "cluster.feature:6"
+  },
+  {
+    "command": "CLUSTER SLOTS",
+    "status": "positive",
+    "scenario": "cluster.feature:6"
+  },
+  {
+    "command": "CLUSTER ADDSLOTSRANGE",
+    "status": "positive",
+    "scenario": "cluster.feature:39"
+  },
+  {
+    "command": "CLUSTER INFO",
+    "status": "positive",
+    "scenario": "cluster.feature:39"
+  },
+  {
+    "command": "CLUSTER REPLICATE",
+    "status": "positive",
+    "scenario": "cluster.feature:39"
+  },
+  {
+    "command": "CLUSTER SAVECONFIG",
+    "status": "positive",
+    "scenario": "cluster.feature:39"
+  },
+  {
+    "command": "CLUSTER LINKS",
+    "status": "positive",
+    "scenario": "cluster.feature:82"
+  },
+  {
+    "command": "CLUSTER SHARDS",
+    "status": "positive",
+    "scenario": "cluster.feature:117"
+  },
+  {
+    "command": "CLUSTER ADDSLOTS",
+    "status": "positive",
+    "scenario": "cluster.feature:132"
+  },
+  {
+    "command": "CLUSTER DELSLOTS",
+    "status": "positive",
+    "scenario": "cluster.feature:132"
+  },
+  {
+    "command": "CLUSTER DELSLOTSRANGE",
+    "status": "positive",
+    "scenario": "cluster.feature:188"
+  },
+  {
+    "command": "CLUSTER COUNTKEYSINSLOT",
+    "status": "positive",
+    "scenario": "cluster.feature:234"
+  },
+  {
+    "command": "CLUSTER GETKEYSINSLOT",
+    "status": "positive",
+    "scenario": "cluster.feature:234"
+  },
+  {
+    "command": "MSET",
+    "status": "positive",
+    "scenario": "cluster.feature:234"
+  },
+  {
+    "command": "CLUSTER REPLICAS",
+    "status": "positive",
+    "scenario": "cluster.feature:283"
+  },
+  {
+    "command": "CLUSTER SLAVES",
+    "status": "positive",
+    "scenario": "cluster.feature:283"
+  },
+  {
+    "command": "READONLY",
+    "status": "positive",
+    "scenario": "cluster.feature:322"
+  },
+  {
+    "command": "READWRITE",
+    "status": "positive",
+    "scenario": "cluster.feature:322"
+  },
+  {
+    "command": "ASKING",
+    "status": "positive",
+    "scenario": "cluster.feature:379"
+  },
+  {
+    "command": "CLUSTER SETSLOT",
+    "status": "positive",
+    "scenario": "cluster.feature:379"
+  },
+  {
+    "command": "CLUSTER MIGRATION",
+    "status": "positive",
+    "scenario": "cluster.feature:498"
+  },
+  {
+    "command": "CLUSTER FAILOVER",
+    "status": "positive",
+    "scenario": "cluster.feature:647"
+  },
+  {
+    "command": "CLUSTER COUNT-FAILURE-REPORTS",
+    "status": "positive",
+    "scenario": "cluster.feature:682"
+  },
+  {
+    "command": "CLUSTER BUMPEPOCH",
+    "status": "positive",
+    "scenario": "cluster.feature:722"
+  },
+  {
+    "command": "CLUSTER SET-CONFIG-EPOCH",
+    "status": "positive",
+    "scenario": "cluster.feature:722"
+  },
+  {
+    "command": "CLUSTER FLUSHSLOTS",
+    "status": "positive",
+    "scenario": "cluster.feature:753"
+  },
+  {
+    "command": "CLUSTER FORGET",
+    "status": "positive",
+    "scenario": "cluster.feature:803"
+  },
+  {
+    "command": "CLUSTER RESET",
+    "status": "positive",
+    "scenario": "cluster.feature:829"
+  },
+  {
+    "command": "CLUSTER SLOT-STATS",
+    "status": "positive",
+    "scenario": "cluster.feature:871"
+  },
+  {
+    "command": "FCALL_RO",
+    "status": "positive",
+    "scenario": "cluster.feature:1011"
+  },
+  {
+    "command": "FT.SEARCH",
+    "status": "positive",
+    "scenario": "cluster.feature:1011"
+  },
+  {
+    "command": "FUNCTION LOAD",
+    "status": "positive",
+    "scenario": "cluster.feature:1011"
+  },
+  {
+    "command": "ACL WHOAMI",
+    "status": "positive",
+    "scenario": "connections.feature:4"
+  },
+  {
+    "command": "CLIENT GETNAME",
+    "status": "positive",
+    "scenario": "connections.feature:85"
+  },
+  {
+    "command": "CLIENT SETNAME",
+    "status": "positive",
+    "scenario": "connections.feature:85"
+  },
+  {
+    "command": "HELLO",
+    "status": "positive",
+    "scenario": "connections.feature:85"
+  },
+  {
+    "command": "CLIENT INFO",
+    "status": "positive",
+    "scenario": "connections.feature:137"
+  },
+  {
+    "command": "CLIENT SETINFO",
+    "status": "positive",
+    "scenario": "connections.feature:137"
+  },
+  {
+    "command": "CLIENT NO-EVICT",
+    "status": "positive",
+    "scenario": "connections.feature:227"
+  },
+  {
+    "command": "CLIENT NO-TOUCH",
+    "status": "positive",
+    "scenario": "connections.feature:227"
+  },
+  {
+    "command": "CLIENT KILL",
+    "status": "positive",
+    "scenario": "connections.feature:266"
+  },
+  {
+    "command": "BLPOP",
+    "status": "positive",
+    "scenario": "connections.feature:353"
+  },
+  {
+    "command": "LPOP",
+    "status": "positive",
+    "scenario": "connections.feature:353"
+  },
+  {
+    "command": "CLIENT REPLY",
+    "status": "positive",
+    "scenario": "connections.feature:399"
+  },
+  {
+    "command": "ECHO",
+    "status": "positive",
+    "scenario": "connections.feature:399"
+  },
+  {
+    "command": "CLIENT GETREDIR",
+    "status": "positive",
+    "scenario": "connections.feature:495"
+  },
+  {
+    "command": "CLIENT CACHING",
+    "status": "positive",
+    "scenario": "connections.feature:550"
+  },
+  {
+    "command": "CLIENT TRACKINGINFO",
+    "status": "positive",
+    "scenario": "connections.feature:550"
+  },
+  {
+    "command": "RESET",
+    "status": "positive",
+    "scenario": "connections.feature:686"
+  },
+  {
+    "command": "QUIT",
+    "status": "positive",
+    "scenario": "connections.feature:751"
+  },
+  {
+    "command": "PEXPIREAT",
+    "status": "positive",
+    "scenario": "connections.feature:811"
+  },
+  {
+    "command": "COPY",
+    "status": "positive",
+    "scenario": "generic.feature:5"
+  },
+  {
+    "command": "HDEL",
+    "status": "positive",
+    "scenario": "generic.feature:5"
+  },
+  {
+    "command": "HMGET",
+    "status": "positive",
+    "scenario": "generic.feature:5"
+  },
+  {
+    "command": "HPEXPIREAT",
+    "status": "positive",
+    "scenario": "generic.feature:5"
+  },
+  {
+    "command": "HPEXPIRETIME",
+    "status": "positive",
+    "scenario": "generic.feature:5"
+  },
+  {
+    "command": "PERSIST",
+    "status": "positive",
+    "scenario": "generic.feature:5"
+  },
+  {
+    "command": "PEXPIRETIME",
+    "status": "positive",
+    "scenario": "generic.feature:5"
+  },
+  {
+    "command": "UNLINK",
+    "status": "positive",
+    "scenario": "generic.feature:129"
+  },
+  {
+    "command": "RESTORE",
+    "status": "positive",
+    "scenario": "generic.feature:182"
+  },
+  {
+    "command": "EXPIRE",
+    "status": "positive",
+    "scenario": "generic.feature:377"
+  },
+  {
+    "command": "TTL",
+    "status": "positive",
+    "scenario": "generic.feature:377"
+  },
+  {
+    "command": "PEXPIRE",
+    "status": "positive",
+    "scenario": "generic.feature:515"
+  },
+  {
+    "command": "EXPIREAT",
+    "status": "positive",
+    "scenario": "generic.feature:616"
+  },
+  {
+    "command": "EXPIRETIME",
+    "status": "positive",
+    "scenario": "generic.feature:616"
+  },
+  {
+    "command": "KEYS",
+    "status": "positive",
+    "scenario": "generic.feature:728"
+  },
+  {
+    "command": "MOVE",
+    "status": "positive",
+    "scenario": "generic.feature:768"
+  },
+  {
+    "command": "OBJECT ENCODING",
+    "status": "positive",
+    "scenario": "generic.feature:852"
+  },
+  {
+    "command": "OBJECT REFCOUNT",
+    "status": "positive",
+    "scenario": "generic.feature:852"
+  },
+  {
+    "command": "TYPE",
+    "status": "positive",
+    "scenario": "generic.feature:852"
+  },
+  {
+    "command": "OBJECT IDLETIME",
+    "status": "positive",
+    "scenario": "generic.feature:905"
+  },
+  {
+    "command": "TOUCH",
+    "status": "positive",
+    "scenario": "generic.feature:905"
+  },
+  {
+    "command": "OBJECT FREQ",
+    "status": "positive",
+    "scenario": "generic.feature:965"
+  },
+  {
+    "command": "RANDOMKEY",
+    "status": "positive",
+    "scenario": "generic.feature:1012"
+  },
+  {
+    "command": "RENAME",
+    "status": "positive",
+    "scenario": "generic.feature:1042"
+  },
+  {
+    "command": "MGET",
+    "status": "positive",
+    "scenario": "generic.feature:1103"
+  },
+  {
+    "command": "RENAMENX",
+    "status": "positive",
+    "scenario": "generic.feature:1103"
+  },
+  {
+    "command": "SCAN",
+    "status": "positive",
+    "scenario": "generic.feature:1159"
+  },
+  {
+    "command": "SORT",
+    "status": "positive",
+    "scenario": "generic.feature:1203"
+  },
+  {
+    "command": "SADD",
+    "status": "positive",
+    "scenario": "generic.feature:1304"
+  },
+  {
+    "command": "SCARD",
+    "status": "positive",
+    "scenario": "generic.feature:1304"
+  },
+  {
+    "command": "ZADD",
+    "status": "positive",
+    "scenario": "generic.feature:1352"
+  },
+  {
+    "command": "MIGRATE",
+    "status": "positive",
+    "scenario": "generic.feature:1408"
+  },
+  {
+    "command": "GEOADD",
+    "status": "positive",
+    "scenario": "geo.feature:5"
+  },
+  {
+    "command": "GEODIST",
+    "status": "positive",
+    "scenario": "geo.feature:5"
+  },
+  {
+    "command": "GEOHASH",
+    "status": "positive",
+    "scenario": "geo.feature:5"
+  },
+  {
+    "command": "GEOPOS",
+    "status": "positive",
+    "scenario": "geo.feature:5"
+  },
+  {
+    "command": "GEORADIUS",
+    "status": "positive",
+    "scenario": "geo.feature:70"
+  },
+  {
+    "command": "GEORADIUSBYMEMBER",
+    "status": "positive",
+    "scenario": "geo.feature:70"
+  },
+  {
+    "command": "GEORADIUSBYMEMBER_RO",
+    "status": "positive",
+    "scenario": "geo.feature:70"
+  },
+  {
+    "command": "GEORADIUS_RO",
+    "status": "positive",
+    "scenario": "geo.feature:70"
+  },
+  {
+    "command": "GEOSEARCH",
+    "status": "positive",
+    "scenario": "geo.feature:125"
+  },
+  {
+    "command": "GEOSEARCHSTORE",
+    "status": "positive",
+    "scenario": "geo.feature:125"
+  },
+  {
+    "command": "ZSCORE",
+    "status": "positive",
+    "scenario": "geo.feature:125"
+  },
+  {
+    "command": "ZCARD",
+    "status": "positive",
+    "scenario": "geo.feature:195"
+  },
+  {
+    "command": "HGETALL",
+    "status": "positive",
+    "scenario": "hashes.feature:4"
+  },
+  {
+    "command": "HEXISTS",
+    "status": "positive",
+    "scenario": "hashes.feature:49"
+  },
+  {
+    "command": "HSETNX",
+    "status": "positive",
+    "scenario": "hashes.feature:49"
+  },
+  {
+    "command": "HLEN",
+    "status": "positive",
+    "scenario": "hashes.feature:97"
+  },
+  {
+    "command": "HMSET",
+    "status": "positive",
+    "scenario": "hashes.feature:97"
+  },
+  {
+    "command": "HKEYS",
+    "status": "positive",
+    "scenario": "hashes.feature:125"
+  },
+  {
+    "command": "HSTRLEN",
+    "status": "positive",
+    "scenario": "hashes.feature:125"
+  },
+  {
+    "command": "HVALS",
+    "status": "positive",
+    "scenario": "hashes.feature:125"
+  },
+  {
+    "command": "HINCRBY",
+    "status": "positive",
+    "scenario": "hashes.feature:197"
+  },
+  {
+    "command": "HINCRBYFLOAT",
+    "status": "positive",
+    "scenario": "hashes.feature:242"
+  },
+  {
+    "command": "HSCAN",
+    "status": "positive",
+    "scenario": "hashes.feature:287"
+  },
+  {
+    "command": "HGETDEL",
+    "status": "positive",
+    "scenario": "hashes.feature:319"
+  },
+  {
+    "command": "HGETEX",
+    "status": "positive",
+    "scenario": "hashes.feature:343"
+  },
+  {
+    "command": "HPTTL",
+    "status": "positive",
+    "scenario": "hashes.feature:343"
+  },
+  {
+    "command": "HSETEX",
+    "status": "positive",
+    "scenario": "hashes.feature:430"
+  },
+  {
+    "command": "HEXPIRE",
+    "status": "positive",
+    "scenario": "hashes.feature:486"
+  },
+  {
+    "command": "HPEXPIRE",
+    "status": "positive",
+    "scenario": "hashes.feature:526"
+  },
+  {
+    "command": "HEXPIREAT",
+    "status": "positive",
+    "scenario": "hashes.feature:566"
+  },
+  {
+    "command": "HEXPIRETIME",
+    "status": "positive",
+    "scenario": "hashes.feature:566"
+  },
+  {
+    "command": "HPERSIST",
+    "status": "positive",
+    "scenario": "hashes.feature:662"
+  },
+  {
+    "command": "HTTL",
+    "status": "positive",
+    "scenario": "hashes.feature:662"
+  },
+  {
+    "command": "HRANDFIELD",
+    "status": "positive",
+    "scenario": "hashes.feature:702"
+  },
+  {
+    "command": "HIMPORT",
+    "status": "positive",
+    "scenario": "hashes.feature:877"
+  },
+  {
+    "command": "HIMPORT PREPARE",
+    "status": "positive",
+    "scenario": "hashes.feature:877"
+  },
+  {
+    "command": "HIMPORT SET",
+    "status": "positive",
+    "scenario": "hashes.feature:877"
+  },
+  {
+    "command": "HIMPORT DISCARD",
+    "status": "positive",
+    "scenario": "hashes.feature:984"
+  },
+  {
+    "command": "HIMPORT DISCARDALL",
+    "status": "positive",
+    "scenario": "hashes.feature:984"
+  },
+  {
+    "command": "DISCARD",
+    "status": "positive",
+    "scenario": "hashes.feature:1229"
+  },
+  {
+    "command": "PFADD",
+    "status": "positive",
+    "scenario": "hyperloglog.feature:5"
+  },
+  {
+    "command": "PFMERGE",
+    "status": "positive",
+    "scenario": "hyperloglog.feature:89"
+  },
+  {
+    "command": "PFDEBUG",
+    "status": "positive",
+    "scenario": "hyperloglog.feature:161"
+  },
+  {
+    "command": "PFSELFTEST",
+    "status": "positive",
+    "scenario": "hyperloglog.feature:257"
+  },
+  {
+    "command": "JSON.GET",
+    "status": "positive",
+    "scenario": "json.feature:5"
+  },
+  {
+    "command": "JSON.SET",
+    "status": "positive",
+    "scenario": "json.feature:5"
+  },
+  {
+    "command": "JSON.TYPE",
+    "status": "positive",
+    "scenario": "json.feature:5"
+  },
+  {
+    "command": "JSON.ARRAPPEND",
+    "status": "positive",
+    "scenario": "json.feature:54"
+  },
+  {
+    "command": "JSON.ARRINDEX",
+    "status": "positive",
+    "scenario": "json.feature:54"
+  },
+  {
+    "command": "JSON.ARRINSERT",
+    "status": "positive",
+    "scenario": "json.feature:54"
+  },
+  {
+    "command": "JSON.ARRLEN",
+    "status": "positive",
+    "scenario": "json.feature:54"
+  },
+  {
+    "command": "JSON.ARRPOP",
+    "status": "positive",
+    "scenario": "json.feature:54"
+  },
+  {
+    "command": "JSON.ARRTRIM",
+    "status": "positive",
+    "scenario": "json.feature:54"
+  },
+  {
+    "command": "JSON.NUMINCRBY",
+    "status": "positive",
+    "scenario": "json.feature:130"
+  },
+  {
+    "command": "JSON.NUMMULTBY",
+    "status": "positive",
+    "scenario": "json.feature:130"
+  },
+  {
+    "command": "JSON.STRAPPEND",
+    "status": "positive",
+    "scenario": "json.feature:130"
+  },
+  {
+    "command": "JSON.STRLEN",
+    "status": "positive",
+    "scenario": "json.feature:130"
+  },
+  {
+    "command": "JSON.TOGGLE",
+    "status": "positive",
+    "scenario": "json.feature:130"
+  },
+  {
+    "command": "JSON.OBJKEYS",
+    "status": "positive",
+    "scenario": "json.feature:194"
+  },
+  {
+    "command": "JSON.OBJLEN",
+    "status": "positive",
+    "scenario": "json.feature:194"
+  },
+  {
+    "command": "JSON.RESP",
+    "status": "positive",
+    "scenario": "json.feature:194"
+  },
+  {
+    "command": "JSON.CLEAR",
+    "status": "positive",
+    "scenario": "json.feature:225"
+  },
+  {
+    "command": "JSON.DEL",
+    "status": "positive",
+    "scenario": "json.feature:225"
+  },
+  {
+    "command": "JSON.FORGET",
+    "status": "positive",
+    "scenario": "json.feature:225"
+  },
+  {
+    "command": "JSON.MERGE",
+    "status": "positive",
+    "scenario": "json.feature:225"
+  },
+  {
+    "command": "JSON.MGET",
+    "status": "positive",
+    "scenario": "json.feature:312"
+  },
+  {
+    "command": "JSON.MSET",
+    "status": "positive",
+    "scenario": "json.feature:312"
+  },
+  {
+    "command": "JSON.DEBUG",
+    "status": "positive",
+    "scenario": "json.feature:344"
+  },
+  {
+    "command": "JSON.DEBUG MEMORY",
+    "status": "positive",
+    "scenario": "json.feature:344"
+  },
+  {
+    "command": "LLEN",
+    "status": "positive",
+    "scenario": "lists.feature:9"
+  },
+  {
+    "command": "LPUSHX",
+    "status": "positive",
+    "scenario": "lists.feature:45"
+  },
+  {
+    "command": "RPUSHX",
+    "status": "positive",
+    "scenario": "lists.feature:45"
+  },
+  {
+    "command": "RPOP",
+    "status": "positive",
+    "scenario": "lists.feature:93"
+  },
+  {
+    "command": "LSET",
+    "status": "positive",
+    "scenario": "lists.feature:163"
+  },
+  {
+    "command": "LTRIM",
+    "status": "positive",
+    "scenario": "lists.feature:163"
+  },
+  {
+    "command": "LREM",
+    "status": "positive",
+    "scenario": "lists.feature:225"
+  },
+  {
+    "command": "LINSERT",
+    "status": "positive",
+    "scenario": "lists.feature:273"
+  },
+  {
+    "command": "LPOS",
+    "status": "positive",
+    "scenario": "lists.feature:326"
+  },
+  {
+    "command": "LMPOP",
+    "status": "positive",
+    "scenario": "lists.feature:373"
+  },
+  {
+    "command": "LMOVE",
+    "status": "positive",
+    "scenario": "lists.feature:444"
+  },
+  {
+    "command": "RPOPLPUSH",
+    "status": "positive",
+    "scenario": "lists.feature:450"
+  },
+  {
+    "command": "LMOVEM",
+    "status": "positive",
+    "scenario": "lists.feature:544"
+  },
+  {
+    "command": "BRPOP",
+    "status": "positive",
+    "scenario": "lists.feature:661"
+  },
+  {
+    "command": "BLMOVE",
+    "status": "positive",
+    "scenario": "lists.feature:693"
+  },
+  {
+    "command": "BRPOPLPUSH",
+    "status": "positive",
+    "scenario": "lists.feature:694"
+  },
+  {
+    "command": "BLMPOP",
+    "status": "positive",
+    "scenario": "lists.feature:697"
+  },
+  {
+    "command": "BLMOVEM",
+    "status": "positive",
+    "scenario": "lists.feature:726"
+  },
+  {
+    "command": "UNSUBSCRIBE",
+    "status": "positive",
+    "scenario": "pubsub.feature:4"
+  },
+  {
+    "command": "PSUBSCRIBE",
+    "status": "positive",
+    "scenario": "pubsub.feature:52"
+  },
+  {
+    "command": "PUBSUB NUMPAT",
+    "status": "positive",
+    "scenario": "pubsub.feature:52"
+  },
+  {
+    "command": "PUNSUBSCRIBE",
+    "status": "positive",
+    "scenario": "pubsub.feature:52"
+  },
+  {
+    "command": "PUBSUB CHANNELS",
+    "status": "positive",
+    "scenario": "pubsub.feature:120"
+  },
+  {
+    "command": "PUBSUB NUMSUB",
+    "status": "positive",
+    "scenario": "pubsub.feature:120"
+  },
+  {
+    "command": "PUBSUB SHARDCHANNELS",
+    "status": "positive",
+    "scenario": "pubsub.feature:152"
+  },
+  {
+    "command": "PUBSUB SHARDNUMSUB",
+    "status": "positive",
+    "scenario": "pubsub.feature:152"
+  },
+  {
+    "command": "SUNSUBSCRIBE",
+    "status": "positive",
+    "scenario": "pubsub.feature:152"
+  },
+  {
+    "command": "SLAVEOF",
+    "status": "positive",
+    "scenario": "replication.feature:86"
+  },
+  {
+    "command": "PSYNC",
+    "status": "positive",
+    "scenario": "replication.feature:109"
+  },
+  {
+    "command": "REPLCONF",
+    "status": "positive",
+    "scenario": "replication.feature:109"
+  },
+  {
+    "command": "CONFIG GET",
+    "status": "positive",
+    "scenario": "replication.feature:137"
+  },
+  {
+    "command": "SYNC",
+    "status": "positive",
+    "scenario": "replication.feature:148"
+  },
+  {
+    "command": "FAILOVER",
+    "status": "positive",
+    "scenario": "replication.feature:298"
+  },
+  {
+    "command": "ROLE",
+    "status": "positive",
+    "scenario": "replication.feature:298"
+  },
+  {
+    "command": "EVALSHA",
+    "status": "positive",
+    "scenario": "scripting.feature:30"
+  },
+  {
+    "command": "SCRIPT EXISTS",
+    "status": "positive",
+    "scenario": "scripting.feature:30"
+  },
+  {
+    "command": "SCRIPT FLUSH",
+    "status": "positive",
+    "scenario": "scripting.feature:30"
+  },
+  {
+    "command": "SCRIPT LOAD",
+    "status": "positive",
+    "scenario": "scripting.feature:30"
+  },
+  {
+    "command": "EVALSHA_RO",
+    "status": "positive",
+    "scenario": "scripting.feature:76"
+  },
+  {
+    "command": "EVAL_RO",
+    "status": "positive",
+    "scenario": "scripting.feature:76"
+  },
+  {
+    "command": "FCALL",
+    "status": "positive",
+    "scenario": "scripting.feature:123"
+  },
+  {
+    "command": "FUNCTION LIST",
+    "status": "positive",
+    "scenario": "scripting.feature:123"
+  },
+  {
+    "command": "FUNCTION DELETE",
+    "status": "positive",
+    "scenario": "scripting.feature:211"
+  },
+  {
+    "command": "FUNCTION DUMP",
+    "status": "positive",
+    "scenario": "scripting.feature:211"
+  },
+  {
+    "command": "FUNCTION FLUSH",
+    "status": "positive",
+    "scenario": "scripting.feature:211"
+  },
+  {
+    "command": "FUNCTION RESTORE",
+    "status": "positive",
+    "scenario": "scripting.feature:211"
+  },
+  {
+    "command": "FUNCTION STATS",
+    "status": "positive",
+    "scenario": "scripting.feature:338"
+  },
+  {
+    "command": "SCRIPT KILL",
+    "status": "positive",
+    "scenario": "scripting.feature:377"
+  },
+  {
+    "command": "FUNCTION KILL",
+    "status": "positive",
+    "scenario": "scripting.feature:513"
+  },
+  {
+    "command": "FT.DROPINDEX",
+    "status": "positive",
+    "scenario": "search.feature:61"
+  },
+  {
+    "command": "FT.INFO",
+    "status": "positive",
+    "scenario": "search.feature:161"
+  },
+  {
+    "command": "FT.ALIASADD",
+    "status": "positive",
+    "scenario": "search.feature:206"
+  },
+  {
+    "command": "FT.ALIASDEL",
+    "status": "positive",
+    "scenario": "search.feature:206"
+  },
+  {
+    "command": "FT.ALIASLIST",
+    "status": "positive",
+    "scenario": "search.feature:206"
+  },
+  {
+    "command": "FT.ALIASUPDATE",
+    "status": "positive",
+    "scenario": "search.feature:206"
+  },
+  {
+    "command": "FT.ALTER",
+    "status": "positive",
+    "scenario": "search.feature:255"
+  },
+  {
+    "command": "FT.CONFIG GET",
+    "status": "positive",
+    "scenario": "search.feature:284"
+  },
+  {
+    "command": "FT.CONFIG SET",
+    "status": "positive",
+    "scenario": "search.feature:284"
+  },
+  {
+    "command": "FT.DICTADD",
+    "status": "positive",
+    "scenario": "search.feature:321"
+  },
+  {
+    "command": "FT.DICTDEL",
+    "status": "positive",
+    "scenario": "search.feature:321"
+  },
+  {
+    "command": "FT.DICTDUMP",
+    "status": "positive",
+    "scenario": "search.feature:321"
+  },
+  {
+    "command": "FT.SPELLCHECK",
+    "status": "positive",
+    "scenario": "search.feature:321"
+  },
+  {
+    "command": "FT.SYNDUMP",
+    "status": "positive",
+    "scenario": "search.feature:361"
+  },
+  {
+    "command": "FT.SYNUPDATE",
+    "status": "positive",
+    "scenario": "search.feature:361"
+  },
+  {
+    "command": "FT.TAGVALS",
+    "status": "positive",
+    "scenario": "search.feature:406"
+  },
+  {
+    "command": "FT.EXPLAIN",
+    "status": "positive",
+    "scenario": "search.feature:490"
+  },
+  {
+    "command": "FT.EXPLAINCLI",
+    "status": "positive",
+    "scenario": "search.feature:490"
+  },
+  {
+    "command": "FT.AGGREGATE",
+    "status": "positive",
+    "scenario": "search.feature:511"
+  },
+  {
+    "command": "FT.CURSOR READ",
+    "status": "positive",
+    "scenario": "search.feature:598"
+  },
+  {
+    "command": "FT.CURSOR DEL",
+    "status": "positive",
+    "scenario": "search.feature:637"
+  },
+  {
+    "command": "FT.PROFILE",
+    "status": "positive",
+    "scenario": "search.feature:663"
+  },
+  {
+    "command": "FT.HYBRID",
+    "status": "positive",
+    "scenario": "search.feature:726"
+  },
+  {
+    "command": "CONFIG SET",
+    "status": "positive",
+    "scenario": "server.feature:5"
+  },
+  {
+    "command": "CONFIG REWRITE",
+    "status": "positive",
+    "scenario": "server.feature:79"
+  },
+  {
+    "command": "CONFIG RESETSTAT",
+    "status": "positive",
+    "scenario": "server.feature:97"
+  },
+  {
+    "command": "LATENCY HISTOGRAM",
+    "status": "positive",
+    "scenario": "server.feature:97"
+  },
+  {
+    "command": "LASTSAVE",
+    "status": "positive",
+    "scenario": "server.feature:138"
+  },
+  {
+    "command": "SAVE",
+    "status": "positive",
+    "scenario": "server.feature:138"
+  },
+  {
+    "command": "BGSAVE",
+    "status": "positive",
+    "scenario": "server.feature:160"
+  },
+  {
+    "command": "BGREWRITEAOF",
+    "status": "positive",
+    "scenario": "server.feature:182"
+  },
+  {
+    "command": "BACKUP LIST",
+    "status": "positive",
+    "scenario": "server.feature:204"
+  },
+  {
+    "command": "BACKUP SEAL",
+    "status": "positive",
+    "scenario": "server.feature:204"
+  },
+  {
+    "command": "BACKUP START",
+    "status": "positive",
+    "scenario": "server.feature:204"
+  },
+  {
+    "command": "BACKUP STATUS",
+    "status": "positive",
+    "scenario": "server.feature:204"
+  },
+  {
+    "command": "BACKUP ABORT",
+    "status": "positive",
+    "scenario": "server.feature:246"
+  },
+  {
+    "command": "BACKUP CLEANUP",
+    "status": "positive",
+    "scenario": "server.feature:246"
+  },
+  {
+    "command": "HOTKEYS",
+    "status": "positive",
+    "scenario": "server.feature:303"
+  },
+  {
+    "command": "HOTKEYS GET",
+    "status": "positive",
+    "scenario": "server.feature:303"
+  },
+  {
+    "command": "HOTKEYS RESET",
+    "status": "positive",
+    "scenario": "server.feature:303"
+  },
+  {
+    "command": "HOTKEYS START",
+    "status": "positive",
+    "scenario": "server.feature:303"
+  },
+  {
+    "command": "HOTKEYS STOP",
+    "status": "positive",
+    "scenario": "server.feature:303"
+  },
+  {
+    "command": "MEMORY DOCTOR",
+    "status": "positive",
+    "scenario": "server.feature:353"
+  },
+  {
+    "command": "MEMORY MALLOC-STATS",
+    "status": "positive",
+    "scenario": "server.feature:353"
+  },
+  {
+    "command": "MEMORY PURGE",
+    "status": "positive",
+    "scenario": "server.feature:353"
+  },
+  {
+    "command": "MEMORY STATS",
+    "status": "positive",
+    "scenario": "server.feature:353"
+  },
+  {
+    "command": "MEMORY USAGE",
+    "status": "positive",
+    "scenario": "server.feature:353"
+  },
+  {
+    "command": "LATENCY DOCTOR",
+    "status": "positive",
+    "scenario": "server.feature:410"
+  },
+  {
+    "command": "LATENCY GRAPH",
+    "status": "positive",
+    "scenario": "server.feature:410"
+  },
+  {
+    "command": "LATENCY HISTORY",
+    "status": "positive",
+    "scenario": "server.feature:410"
+  },
+  {
+    "command": "LATENCY LATEST",
+    "status": "positive",
+    "scenario": "server.feature:410"
+  },
+  {
+    "command": "LATENCY RESET",
+    "status": "positive",
+    "scenario": "server.feature:410"
+  },
+  {
+    "command": "SLOWLOG GET",
+    "status": "positive",
+    "scenario": "server.feature:452"
+  },
+  {
+    "command": "SLOWLOG LEN",
+    "status": "positive",
+    "scenario": "server.feature:452"
+  },
+  {
+    "command": "SLOWLOG RESET",
+    "status": "positive",
+    "scenario": "server.feature:452"
+  },
+  {
+    "command": "MONITOR",
+    "status": "positive",
+    "scenario": "server.feature:489"
+  },
+  {
+    "command": "TIME",
+    "status": "positive",
+    "scenario": "server.feature:533"
+  },
+  {
+    "command": "LOLWUT",
+    "status": "positive",
+    "scenario": "server.feature:542"
+  },
+  {
+    "command": "SHUTDOWN",
+    "status": "positive",
+    "scenario": "server.feature:551"
+  },
+  {
+    "command": "MODULE LIST",
+    "status": "positive",
+    "scenario": "server.feature:569"
+  },
+  {
+    "command": "MODULE UNLOAD",
+    "status": "positive",
+    "scenario": "server.feature:594"
+  },
+  {
+    "command": "MODULE LOADEX",
+    "status": "positive",
+    "scenario": "server.feature:647"
+  },
+  {
+    "command": "ACL DRYRUN",
+    "status": "positive",
+    "scenario": "server.feature:914"
+  },
+  {
+    "command": "ACL GETUSER",
+    "status": "positive",
+    "scenario": "server.feature:1176"
+  },
+  {
+    "command": "ACL CAT",
+    "status": "positive",
+    "scenario": "server.feature:1290"
+  },
+  {
+    "command": "ACL DELUSER",
+    "status": "positive",
+    "scenario": "server.feature:1307"
+  },
+  {
+    "command": "ACL LIST",
+    "status": "positive",
+    "scenario": "server.feature:1307"
+  },
+  {
+    "command": "ACL USERS",
+    "status": "positive",
+    "scenario": "server.feature:1307"
+  },
+  {
+    "command": "ACL GENPASS",
+    "status": "positive",
+    "scenario": "server.feature:1396"
+  },
+  {
+    "command": "ACL LOAD",
+    "status": "positive",
+    "scenario": "server.feature:1425"
+  },
+  {
+    "command": "ACL SAVE",
+    "status": "positive",
+    "scenario": "server.feature:1425"
+  },
+  {
+    "command": "SREM",
+    "status": "positive",
+    "scenario": "sets.feature:5"
+  },
+  {
+    "command": "SISMEMBER",
+    "status": "positive",
+    "scenario": "sets.feature:57"
+  },
+  {
+    "command": "SMISMEMBER",
+    "status": "positive",
+    "scenario": "sets.feature:57"
+  },
+  {
+    "command": "SMEMBERS",
+    "status": "positive",
+    "scenario": "sets.feature:97"
+  },
+  {
+    "command": "SDIFF",
+    "status": "positive",
+    "scenario": "sets.feature:122"
+  },
+  {
+    "command": "SINTER",
+    "status": "positive",
+    "scenario": "sets.feature:147"
+  },
+  {
+    "command": "SUNION",
+    "status": "positive",
+    "scenario": "sets.feature:172"
+  },
+  {
+    "command": "SDIFFSTORE",
+    "status": "positive",
+    "scenario": "sets.feature:197"
+  },
+  {
+    "command": "SINTERSTORE",
+    "status": "positive",
+    "scenario": "sets.feature:237"
+  },
+  {
+    "command": "SUNIONSTORE",
+    "status": "positive",
+    "scenario": "sets.feature:277"
+  },
+  {
+    "command": "SDIFFCARD",
+    "status": "positive",
+    "scenario": "sets.feature:317"
+  },
+  {
+    "command": "SINTERCARD",
+    "status": "positive",
+    "scenario": "sets.feature:375"
+  },
+  {
+    "command": "SUNIONCARD",
+    "status": "positive",
+    "scenario": "sets.feature:433"
+  },
+  {
+    "command": "SMOVE",
+    "status": "positive",
+    "scenario": "sets.feature:507"
+  },
+  {
+    "command": "SPOP",
+    "status": "positive",
+    "scenario": "sets.feature:568"
+  },
+  {
+    "command": "SRANDMEMBER",
+    "status": "positive",
+    "scenario": "sets.feature:610"
+  },
+  {
+    "command": "SSCAN",
+    "status": "positive",
+    "scenario": "sets.feature:647"
+  },
+  {
+    "command": "ZRANGE",
+    "status": "positive",
+    "scenario": "sorted_sets.feature:4"
+  },
+  {
+    "command": "ZCOUNT",
+    "status": "positive",
+    "scenario": "sorted_sets.feature:68"
+  },
+  {
+    "command": "ZINCRBY",
+    "status": "positive",
+    "scenario": "sorted_sets.feature:92"
+  },
+  {
+    "command": "ZMSCORE",
+    "status": "positive",
+    "scenario": "sorted_sets.feature:145"
+  },
+  {
+    "command": "ZRANK",
+    "status": "positive",
+    "scenario": "sorted_sets.feature:161"
+  },
+  {
+    "command": "ZREVRANK",
+    "status": "positive",
+    "scenario": "sorted_sets.feature:185"
+  },
+  {
+    "command": "ZRANGEBYSCORE",
+    "status": "positive",
+    "scenario": "sorted_sets.feature:241"
+  },
+  {
+    "command": "ZREVRANGEBYSCORE",
+    "status": "positive",
+    "scenario": "sorted_sets.feature:257"
+  },
+  {
+    "command": "ZREVRANGE",
+    "status": "positive",
+    "scenario": "sorted_sets.feature:273"
+  },
+  {
+    "command": "ZRANGEBYLEX",
+    "status": "positive",
+    "scenario": "sorted_sets.feature:289"
+  },
+  {
+    "command": "ZREVRANGEBYLEX",
+    "status": "positive",
+    "scenario": "sorted_sets.feature:313"
+  },
+  {
+    "command": "ZLEXCOUNT",
+    "status": "positive",
+    "scenario": "sorted_sets.feature:337"
+  },
+  {
+    "command": "ZREM",
+    "status": "positive",
+    "scenario": "sorted_sets.feature:361"
+  },
+  {
+    "command": "ZREMRANGEBYRANK",
+    "status": "positive",
+    "scenario": "sorted_sets.feature:385"
+  },
+  {
+    "command": "ZREMRANGEBYSCORE",
+    "status": "positive",
+    "scenario": "sorted_sets.feature:409"
+  },
+  {
+    "command": "ZREMRANGEBYLEX",
+    "status": "positive",
+    "scenario": "sorted_sets.feature:433"
+  },
+  {
+    "command": "ZPOPMIN",
+    "status": "positive",
+    "scenario": "sorted_sets.feature:473"
+  },
+  {
+    "command": "ZPOPMAX",
+    "status": "positive",
+    "scenario": "sorted_sets.feature:505"
+  },
+  {
+    "command": "ZRANDMEMBER",
+    "status": "positive",
+    "scenario": "sorted_sets.feature:529"
+  },
+  {
+    "command": "ZSCAN",
+    "status": "positive",
+    "scenario": "sorted_sets.feature:569"
+  },
+  {
+    "command": "ZDIFF",
+    "status": "positive",
+    "scenario": "sorted_sets.feature:585"
+  },
+  {
+    "command": "ZDIFFSTORE",
+    "status": "positive",
+    "scenario": "sorted_sets.feature:609"
+  },
+  {
+    "command": "ZUNION",
+    "status": "positive",
+    "scenario": "sorted_sets.feature:641"
+  },
+  {
+    "command": "ZINTER",
+    "status": "positive",
+    "scenario": "sorted_sets.feature:657"
+  },
+  {
+    "command": "ZINTERCARD",
+    "status": "positive",
+    "scenario": "sorted_sets.feature:681"
+  },
+  {
+    "command": "ZUNIONSTORE",
+    "status": "positive",
+    "scenario": "sorted_sets.feature:705"
+  },
+  {
+    "command": "ZINTERSTORE",
+    "status": "positive",
+    "scenario": "sorted_sets.feature:729"
+  },
+  {
+    "command": "ZRANGESTORE",
+    "status": "positive",
+    "scenario": "sorted_sets.feature:753"
+  },
+  {
+    "command": "ZMPOP",
+    "status": "positive",
+    "scenario": "sorted_sets.feature:801"
+  },
+  {
+    "command": "BZPOPMIN",
+    "status": "positive",
+    "scenario": "sorted_sets.feature:833"
+  },
+  {
+    "command": "BZPOPMAX",
+    "status": "positive",
+    "scenario": "sorted_sets.feature:861"
+  },
+  {
+    "command": "BZMPOP",
+    "status": "positive",
+    "scenario": "sorted_sets.feature:889"
+  },
+  {
+    "command": "XADD",
+    "status": "positive",
+    "scenario": "streams.feature:5"
+  },
+  {
+    "command": "XDEL",
+    "status": "positive",
+    "scenario": "streams.feature:5"
+  },
+  {
+    "command": "XLEN",
+    "status": "positive",
+    "scenario": "streams.feature:5"
+  },
+  {
+    "command": "XRANGE",
+    "status": "positive",
+    "scenario": "streams.feature:5"
+  },
+  {
+    "command": "XREVRANGE",
+    "status": "positive",
+    "scenario": "streams.feature:5"
+  },
+  {
+    "command": "XTRIM",
+    "status": "positive",
+    "scenario": "streams.feature:5"
+  },
+  {
+    "command": "XREAD",
+    "status": "positive",
+    "scenario": "streams.feature:94"
+  },
+  {
+    "command": "XACK",
+    "status": "positive",
+    "scenario": "streams.feature:126"
+  },
+  {
+    "command": "XGROUP CREATE",
+    "status": "positive",
+    "scenario": "streams.feature:126"
+  },
+  {
+    "command": "XGROUP CREATECONSUMER",
+    "status": "positive",
+    "scenario": "streams.feature:126"
+  },
+  {
+    "command": "XINFO CONSUMERS",
+    "status": "positive",
+    "scenario": "streams.feature:126"
+  },
+  {
+    "command": "XINFO GROUPS",
+    "status": "positive",
+    "scenario": "streams.feature:126"
+  },
+  {
+    "command": "XINFO STREAM",
+    "status": "positive",
+    "scenario": "streams.feature:126"
+  },
+  {
+    "command": "XPENDING",
+    "status": "positive",
+    "scenario": "streams.feature:126"
+  },
+  {
+    "command": "XREADGROUP",
+    "status": "positive",
+    "scenario": "streams.feature:126"
+  },
+  {
+    "command": "XAUTOCLAIM",
+    "status": "positive",
+    "scenario": "streams.feature:223"
+  },
+  {
+    "command": "XCLAIM",
+    "status": "positive",
+    "scenario": "streams.feature:223"
+  },
+  {
+    "command": "XNACK",
+    "status": "positive",
+    "scenario": "streams.feature:262"
+  },
+  {
+    "command": "XGROUP DELCONSUMER",
+    "status": "positive",
+    "scenario": "streams.feature:301"
+  },
+  {
+    "command": "XGROUP DESTROY",
+    "status": "positive",
+    "scenario": "streams.feature:301"
+  },
+  {
+    "command": "XGROUP SETID",
+    "status": "positive",
+    "scenario": "streams.feature:301"
+  },
+  {
+    "command": "XACKDEL",
+    "status": "positive",
+    "scenario": "streams.feature:373"
+  },
+  {
+    "command": "XDELEX",
+    "status": "positive",
+    "scenario": "streams.feature:373"
+  },
+  {
+    "command": "XSETID",
+    "status": "positive",
+    "scenario": "streams.feature:452"
+  },
+  {
+    "command": "XCFGSET",
+    "status": "positive",
+    "scenario": "streams.feature:497"
+  },
+  {
+    "command": "XIDMPRECORD",
+    "status": "positive",
+    "scenario": "streams.feature:497"
+  },
+  {
+    "command": "DIGEST",
+    "status": "positive",
+    "scenario": "strings.feature:67"
+  },
+  {
+    "command": "DELEX",
+    "status": "positive",
+    "scenario": "strings.feature:117"
+  },
+  {
+    "command": "APPEND",
+    "status": "positive",
+    "scenario": "strings.feature:165"
+  },
+  {
+    "command": "STRLEN",
+    "status": "positive",
+    "scenario": "strings.feature:165"
+  },
+  {
+    "command": "DECR",
+    "status": "positive",
+    "scenario": "strings.feature:209"
+  },
+  {
+    "command": "DECRBY",
+    "status": "positive",
+    "scenario": "strings.feature:209"
+  },
+  {
+    "command": "INCR",
+    "status": "positive",
+    "scenario": "strings.feature:258"
+  },
+  {
+    "command": "INCRBY",
+    "status": "positive",
+    "scenario": "strings.feature:258"
+  },
+  {
+    "command": "INCRBYFLOAT",
+    "status": "positive",
+    "scenario": "strings.feature:299"
+  },
+  {
+    "command": "INCREX",
+    "status": "positive",
+    "scenario": "strings.feature:344"
+  },
+  {
+    "command": "GETDEL",
+    "status": "positive",
+    "scenario": "strings.feature:413"
+  },
+  {
+    "command": "GETEX",
+    "status": "positive",
+    "scenario": "strings.feature:442"
+  },
+  {
+    "command": "GETRANGE",
+    "status": "positive",
+    "scenario": "strings.feature:495"
+  },
+  {
+    "command": "SUBSTR",
+    "status": "positive",
+    "scenario": "strings.feature:495"
+  },
+  {
+    "command": "GETSET",
+    "status": "positive",
+    "scenario": "strings.feature:535"
+  },
+  {
+    "command": "LCS",
+    "status": "positive",
+    "scenario": "strings.feature:580"
+  },
+  {
+    "command": "MSETEX",
+    "status": "positive",
+    "scenario": "strings.feature:665"
+  },
+  {
+    "command": "MSETNX",
+    "status": "positive",
+    "scenario": "strings.feature:761"
+  },
+  {
+    "command": "PSETEX",
+    "status": "positive",
+    "scenario": "strings.feature:797"
+  },
+  {
+    "command": "SETEX",
+    "status": "positive",
+    "scenario": "strings.feature:830"
+  },
+  {
+    "command": "SETNX",
+    "status": "positive",
+    "scenario": "strings.feature:863"
+  },
+  {
+    "command": "SETRANGE",
+    "status": "positive",
+    "scenario": "strings.feature:891"
+  },
+  {
+    "command": "WATCH",
+    "status": "positive",
+    "scenario": "strings.feature:1092"
+  },
+  {
+    "command": "TS.ADD",
+    "status": "positive",
+    "scenario": "timeseries.feature:5"
+  },
+  {
+    "command": "TS.ALTER",
+    "status": "positive",
+    "scenario": "timeseries.feature:5"
+  },
+  {
+    "command": "TS.CREATE",
+    "status": "positive",
+    "scenario": "timeseries.feature:5"
+  },
+  {
+    "command": "TS.GET",
+    "status": "positive",
+    "scenario": "timeseries.feature:5"
+  },
+  {
+    "command": "TS.INFO",
+    "status": "positive",
+    "scenario": "timeseries.feature:5"
+  },
+  {
+    "command": "TS.QUERYINDEX",
+    "status": "positive",
+    "scenario": "timeseries.feature:5"
+  },
+  {
+    "command": "TS.RANGE",
+    "status": "positive",
+    "scenario": "timeseries.feature:5"
+  },
+  {
+    "command": "TS.DECRBY",
+    "status": "positive",
+    "scenario": "timeseries.feature:116"
+  },
+  {
+    "command": "TS.DEL",
+    "status": "positive",
+    "scenario": "timeseries.feature:116"
+  },
+  {
+    "command": "TS.INCRBY",
+    "status": "positive",
+    "scenario": "timeseries.feature:116"
+  },
+  {
+    "command": "TS.MADD",
+    "status": "positive",
+    "scenario": "timeseries.feature:172"
+  },
+  {
+    "command": "TS.REVRANGE",
+    "status": "positive",
+    "scenario": "timeseries.feature:172"
+  },
+  {
+    "command": "TS.CREATERULE",
+    "status": "positive",
+    "scenario": "timeseries.feature:244"
+  },
+  {
+    "command": "TS.DELETERULE",
+    "status": "positive",
+    "scenario": "timeseries.feature:244"
+  },
+  {
+    "command": "TS.MGET",
+    "status": "positive",
+    "scenario": "timeseries.feature:317"
+  },
+  {
+    "command": "TS.MRANGE",
+    "status": "positive",
+    "scenario": "timeseries.feature:317"
+  },
+  {
+    "command": "TS.MREVRANGE",
+    "status": "positive",
+    "scenario": "timeseries.feature:317"
+  },
+  {
+    "command": "TS.QUERYLABELS",
+    "status": "positive",
+    "scenario": "timeseries.feature:317"
+  },
+  {
+    "command": "TS.NRANGE",
+    "status": "positive",
+    "scenario": "timeseries.feature:375"
+  },
+  {
+    "command": "TS.NREVRANGE",
+    "status": "positive",
+    "scenario": "timeseries.feature:375"
+  },
+  {
+    "command": "TS.READ",
+    "status": "positive",
+    "scenario": "timeseries.feature:399"
+  },
+  {
+    "command": "UNWATCH",
+    "status": "positive",
+    "scenario": "transactions.feature:113"
+  },
+  {
+    "command": "VADD",
+    "status": "positive",
+    "scenario": "vectors.feature:6"
+  },
+  {
+    "command": "VCARD",
+    "status": "positive",
+    "scenario": "vectors.feature:6"
+  },
+  {
+    "command": "VDIM",
+    "status": "positive",
+    "scenario": "vectors.feature:6"
+  },
+  {
+    "command": "VEMB",
+    "status": "positive",
+    "scenario": "vectors.feature:6"
+  },
+  {
+    "command": "VISMEMBER",
+    "status": "positive",
+    "scenario": "vectors.feature:6"
+  },
+  {
+    "command": "VGETATTR",
+    "status": "positive",
+    "scenario": "vectors.feature:88"
+  },
+  {
+    "command": "VSETATTR",
+    "status": "positive",
+    "scenario": "vectors.feature:88"
+  },
+  {
+    "command": "VSIM",
+    "status": "positive",
+    "scenario": "vectors.feature:88"
+  },
+  {
+    "command": "VRANDMEMBER",
+    "status": "positive",
+    "scenario": "vectors.feature:149"
+  },
+  {
+    "command": "VRANGE",
+    "status": "positive",
+    "scenario": "vectors.feature:149"
+  },
+  {
+    "command": "VREM",
+    "status": "positive",
+    "scenario": "vectors.feature:149"
+  },
+  {
+    "command": "VINFO",
+    "status": "positive",
+    "scenario": "vectors.feature:221"
+  },
+  {
+    "command": "VLINKS",
+    "status": "positive",
+    "scenario": "vectors.feature:221"
+  }
+]

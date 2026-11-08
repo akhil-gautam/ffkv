@@ -178,7 +178,7 @@ struct Current<'a> {
 impl<'a> Current<'a> {
     fn new(key: &'a Bytes, entry: &'a Entry, now_ms: i64) -> Self {
         let rows = match &entry.value {
-            Value::String(value) => Rows::String(Some(value)),
+            Value::String(value) => Rows::String(Some(value.bytes())),
             Value::List(values) => Rows::List(values.iter()),
             Value::Set(values) => Rows::Set(values.snapshot()),
             Value::Hash(values) => Rows::Hash(values.snapshot(now_ms)),
@@ -437,7 +437,10 @@ mod tests {
 
     fn command(engine: &mut Engine, now: i64, args: &[&str]) -> Resp {
         let args: Vec<_> = args.iter().map(|arg| b(arg)).collect();
-        match engine.execute_at_time(&args, now).unwrap() {
+        match engine
+            .execute_at_time(&mut crate::engine::BoundCommand::bind(&args), now)
+            .unwrap()
+        {
             super::super::Execution::Reply(reply)
             | super::super::Execution::Pushed { reply, .. } => reply,
             _ => panic!("unexpected blocking snapshot test command"),

@@ -25,6 +25,10 @@ struct Client {
     local: SocketAddr,
     connected: Instant,
     active_ms: AtomicU64,
+    /// Commands its lease counted. Only the lease writes it, with a load and
+    /// a store on the line `active_ms` already dirties, never a shared
+    /// read-modify-write; `State::processed` completes the total.
+    processed: AtomicU64,
     metadata: Mutex<Metadata>,
 }
 
@@ -32,6 +36,10 @@ pub struct State {
     started: Instant,
     clients: Mutex<BTreeMap<u64, Arc<Client>>>,
     next_id: AtomicU64,
+    /// `total_commands_processed` less the live clients' own counts: those of
+    /// closed connections, less the total at the last statistics reset
+    /// (wrapping). Changed only while `clients` is held, so with the counts
+    /// of the clients there it sums exactly.
     processed: AtomicU64,
     port: u16,
     shards: u16,
@@ -50,6 +58,9 @@ pub struct State {
     pub write_gate: Arc<crate::write_gate::WriteGate>,
     pub control_tx: OnceLock<tokio::sync::mpsc::Sender<crate::request::Request>>,
     pub persistence: OnceLock<Arc<crate::persistence::Persistence>>,
+    /// Shard pool for connection-local execution. Weak: the coordinator owns
+    /// the pool and its shard queues; State must not keep them alive.
+    pub pool: OnceLock<std::sync::Weak<crate::sharding::Pool>>,
     actor_ready: AtomicBool,
     actor_ready_notify: tokio::sync::Notify,
 }
@@ -58,27 +69,31 @@ pub struct ClientLease {
     pub id: u64,
     client: Arc<Client>,
     state: Arc<State>,
+    /// The connection's own copy of `client`'s name, which only this lease
+    /// sets: read for each command without the metadata lock.
+    name: Option<Bytes>,
 }
 
 impl ClientLease {
-    pub fn seen(&self) {
-        self.state.processed.fetch_add(1, Ordering::Relaxed);
+    /// Counts one processed command, observed at `at`, as the latest activity.
+    pub fn seen(&mut self, at: Instant) {
+        let processed = &self.client.processed;
+        processed.store(
+            processed.load(Ordering::Relaxed).wrapping_add(1),
+            Ordering::Relaxed,
+        );
         self.client
             .active_ms
-            .store(self.state.elapsed_ms(), Ordering::Relaxed);
+            .store(self.state.elapsed_ms(at), Ordering::Relaxed);
     }
 
     pub fn name(&self) -> Option<Bytes> {
-        self.client
-            .metadata
-            .lock()
-            .expect("client metadata")
-            .name
-            .clone()
+        self.name.clone()
     }
 
-    pub fn set_name(&self, name: Option<Bytes>) {
-        self.client.metadata.lock().expect("client metadata").name = name;
+    pub fn set_name(&mut self, name: Option<Bytes>) {
+        self.client.metadata.lock().expect("client metadata").name = name.clone();
+        self.name = name;
     }
 
     pub fn set_user(&self, user: Option<Bytes>) {
@@ -109,11 +124,13 @@ impl ClientLease {
 
 impl Drop for ClientLease {
     fn drop(&mut self) {
-        self.state
-            .clients
-            .lock()
-            .expect("client registry")
-            .remove(&self.id);
+        let mut clients = self.state.clients.lock().expect("client registry");
+        clients.remove(&self.id);
+        // Its count moves to the closed connections' share under the lock
+        // every total is summed under, so no total misses or repeats it.
+        let processed = self.client.processed.load(Ordering::Relaxed);
+        self.state.processed.fetch_add(processed, Ordering::Relaxed);
+        drop(clients);
         self.state.metrics.connection_close();
     }
 }
@@ -141,6 +158,7 @@ impl State {
             write_gate: Arc::new(crate::write_gate::WriteGate::default()),
             control_tx: OnceLock::new(),
             persistence: OnceLock::new(),
+            pool: OnceLock::new(),
             actor_ready: AtomicBool::new(false),
             actor_ready_notify: tokio::sync::Notify::new(),
             replica: AtomicBool::new(false),
@@ -204,22 +222,45 @@ impl State {
         self.metrics.blocked_clients(count);
     }
 
+    /// Whether anything may report command CPU time: CPU slot statistics or a
+    /// HOTKEYS session. Session CPU feeds nothing else, so a command measures
+    /// a thread CPU window only when this holds as the window begins.
+    pub fn cpu_observed(&self) -> bool {
+        self.cluster.get().is_some_and(|c| c.cpu_stats())
+            || self.server.get().is_some_and(|s| s.cpu_observed())
+    }
+
     pub fn reset_statistics(&self) {
-        self.processed.store(0, Ordering::Relaxed);
+        let clients = self.clients.lock().expect("client registry");
+        let live = Self::live_processed(&clients);
+        self.processed.store(live.wrapping_neg(), Ordering::Relaxed);
+        drop(clients);
         self.metrics.reset_statistics();
     }
 
-    fn elapsed_ms(&self) -> u64 {
-        self.started.elapsed().as_millis().min(u128::from(u64::MAX)) as u64
+    /// Commands the clients in `clients` counted, wrapping as a counter does.
+    fn live_processed(clients: &BTreeMap<u64, Arc<Client>>) -> u64 {
+        clients.values().fold(0, |total, client| {
+            total.wrapping_add(client.processed.load(Ordering::Relaxed))
+        })
+    }
+
+    /// Milliseconds from startup to `at`.
+    fn elapsed_ms(&self, at: Instant) -> u64 {
+        at.saturating_duration_since(self.started)
+            .as_millis()
+            .min(u128::from(u64::MAX)) as u64
     }
 
     pub fn register(self: &Arc<Self>, peer: SocketAddr, local: SocketAddr) -> ClientLease {
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+        let connected = Instant::now();
         let client = Arc::new(Client {
             peer,
             local,
-            connected: Instant::now(),
-            active_ms: AtomicU64::new(self.elapsed_ms()),
+            connected,
+            active_ms: AtomicU64::new(self.elapsed_ms(connected)),
+            processed: AtomicU64::new(0),
             metadata: Mutex::new(Metadata {
                 name: None,
                 library: None,
@@ -237,13 +278,14 @@ impl State {
             id,
             client,
             state: self.clone(),
+            name: None,
         }
     }
 
     pub fn client_info(&self, id: Option<u64>) -> Bytes {
         let clients = self.clients.lock().expect("client registry");
         let mut output = String::new();
-        let now = self.elapsed_ms();
+        let now = self.elapsed_ms(Instant::now());
         use std::fmt::Write;
         for (&client_id, client) in clients
             .iter()
@@ -319,10 +361,15 @@ impl State {
             }
         }
         if wanted(b"stats") {
+            let processed = {
+                let clients = self.clients.lock().expect("client registry");
+                self.processed
+                    .load(Ordering::Relaxed)
+                    .wrapping_add(Self::live_processed(&clients))
+            };
             write!(
                 &mut output,
-                "# Stats\r\ntotal_commands_processed:{}\r\n",
-                self.processed.load(Ordering::Relaxed)
+                "# Stats\r\ntotal_commands_processed:{processed}\r\n",
             )
             .expect("string formatting");
         }
@@ -344,5 +391,67 @@ impl State {
             .expect("string formatting");
         }
         Resp::Bulk(Some(Bytes::from(output)))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn processed(state: &State) -> u64 {
+        let Resp::Bulk(Some(info)) = state.info(&[Bytes::from_static(b"stats")]) else {
+            panic!("INFO replies with a bulk string");
+        };
+        std::str::from_utf8(&info)
+            .unwrap()
+            .lines()
+            .find_map(|line| line.strip_prefix("total_commands_processed:"))
+            .expect("the processed total")
+            .parse()
+            .unwrap()
+    }
+
+    /// Each lease counts `commands` on a thread of its own.
+    fn count(leases: Vec<ClientLease>, commands: u64) -> Vec<ClientLease> {
+        std::thread::scope(|scope| {
+            let counting: Vec<_> = leases
+                .into_iter()
+                .map(|mut lease| {
+                    scope.spawn(move || {
+                        for _ in 0..commands {
+                            lease.seen(Instant::now());
+                        }
+                        lease
+                    })
+                })
+                .collect();
+            counting
+                .into_iter()
+                .map(|thread| thread.join().unwrap())
+                .collect()
+        })
+    }
+
+    #[test]
+    fn processed_total_spans_threads_closed_connections_and_resets() {
+        let state = Arc::new(State::new(0, 1, false));
+        let peer: SocketAddr = "127.0.0.1:40000".parse().unwrap();
+        let local: SocketAddr = "127.0.0.1:6379".parse().unwrap();
+        let mut leases = count((0..8).map(|_| state.register(peer, local)).collect(), 1_000);
+        assert_eq!(processed(&state), 8_000);
+        leases.truncate(5);
+        assert_eq!(processed(&state), 8_000, "closed connections still count");
+        state.reset_statistics();
+        assert_eq!(processed(&state), 0);
+        let leases = count(leases, 10);
+        assert_eq!(processed(&state), 50);
+        drop(leases);
+        assert_eq!(
+            processed(&state),
+            50,
+            "closing after a reset neither loses nor repeats commands"
+        );
+        drop(count(vec![state.register(peer, local)], 7));
+        assert_eq!(processed(&state), 57);
     }
 }

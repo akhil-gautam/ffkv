@@ -168,6 +168,7 @@ class Runtime:
         self.storage = userdata.get("storage", "memory")
         self.process = None
         self.address = None
+        self.management_address = None
         self.clients = {}
         self.versions = {}
         self.saved = {}
@@ -213,7 +214,12 @@ class Runtime:
             stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, env=clean_env(),
         )
         try:
-            self.address = startup_address(self.process)
+            self.address = startup_address(
+                self.process,
+                on_management=(
+                    lambda address: setattr(self, "management_address", address)
+                ) if "--management-bind" in self.extra_args else None,
+            )
         except BaseException:
             self.close()
             raise

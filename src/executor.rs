@@ -1,7 +1,7 @@
 //! Frozen, paused command execution. Resolved effects commit together; ordinary
 //! script failures retain preceding writes, while DEBUG YES uses an undo journal.
 use crate::{
-    engine::{Engine, Execution, ReadyKey, Routing},
+    engine::{BoundCommand, Engine, Execution, ReadyKey, Routing},
     journal::{Batch, Mutation},
     persistence::Persistence,
     pressure::Admission,
@@ -53,28 +53,22 @@ pub struct Atomic<'a> {
     swapped_databases: std::collections::HashSet<u32>,
     debug_swaps: Vec<(u32, u32)>,
 }
+/// A CPU window charged to its session when dropped, measured only while
+/// anything may report it (`State::cpu_observed`).
 struct CpuCharge {
     session: Option<Arc<ClientSession>>,
-    start: std::time::Duration,
+    start: Option<std::time::Duration>,
 }
 impl CpuCharge {
-    fn new(session: Option<Arc<ClientSession>>) -> Self {
-        Self {
-            session,
-            start: crate::server_commands::thread_cpu_time(),
-        }
+    fn new(session: Option<Arc<ClientSession>>, observed: bool) -> Self {
+        let start = ClientSession::cpu_window(session.as_deref(), observed);
+        Self { session, start }
     }
 }
 impl Drop for CpuCharge {
     fn drop(&mut self) {
         if let Some(session) = &self.session {
-            session.cpu_ns.fetch_add(
-                crate::server_commands::thread_cpu_time()
-                    .saturating_sub(self.start)
-                    .as_nanos()
-                    .min(u64::MAX as u128) as u64,
-                std::sync::atomic::Ordering::Relaxed,
-            );
+            session.charge_cpu(self.start);
         }
     }
 }
@@ -189,6 +183,14 @@ impl<'a> Atomic<'a> {
     pub fn set_cluster_client(&mut self, client: crate::cluster::ClusterClient) {
         self.cluster_client = client;
     }
+    /// Starts charging this invocation's session, measured only while
+    /// anything may report it; without an environment, always.
+    fn cpu_charge(&self) -> CpuCharge {
+        CpuCharge::new(
+            self.session.clone(),
+            self.state.is_none_or(|state| state.cpu_observed()),
+        )
+    }
 
     fn admit_script_keys(&mut self, keys: &[Bytes], write: bool) -> Result<(), Resp> {
         let Some(invocation) = self.invocation.filter(|_| self.cluster) else {
@@ -252,17 +254,20 @@ impl<'a> Atomic<'a> {
             context: self.audit_context(),
         })
     }
-    fn authorize(&self, args: &[Bytes]) -> Result<(), Resp> {
+    /// Counted-key errors win over NOPERM, as for every nested command.
+    fn authorize(&self, command: &mut BoundCommand<'_>) -> Result<(), Resp> {
         self.user.as_ref().map_or(Ok(()), |user| {
-            Engine::authorize_logged(args, user, self.audit().as_ref())
+            command.check()?;
+            command.authorize(user, self.audit().as_ref())
         })
     }
 
-    fn capture_undo(&mut self, engine: &mut Engine, args: &[Bytes]) -> io::Result<()> {
+    fn capture_undo(&mut self, engine: &mut Engine, command: &BoundCommand<'_>) -> io::Result<()> {
         if !self.invocation.is_some_and(|context| context.rollback) {
             return Ok(());
         }
-        if Engine::is_readonly(args) && Engine::accessed_keys(args).is_empty() {
+        let args = command.args();
+        if command.is_readonly() && command.accessed_keys().is_empty() {
             return Ok(());
         }
         let selected = engine.database();
@@ -297,7 +302,7 @@ impl<'a> Atomic<'a> {
             snapshot.switch_database(database);
             let mut keys: Vec<_> = engine.live_keys(0).cloned().collect();
             if database == selected {
-                keys.extend(Engine::accessed_keys(args));
+                keys.extend(command.accessed_keys());
             }
             if destination == Some(database) {
                 keys.push(
@@ -388,11 +393,11 @@ impl<'a> Atomic<'a> {
             engine.set_ready_tracking(enabled);
         }
     }
-    fn context(&self, engine: &mut Engine, args: &[Bytes]) {
+    fn context(&self, engine: &mut Engine, command: &BoundCommand<'_>) {
         engine.set_command_user(self.user.clone());
         engine.set_command_version(self.version);
         engine.set_command_session(self.session.clone());
-        engine.set_command_name(args);
+        engine.set_command_name(command);
         engine.set_command_acl_context(self.audit_context());
     }
     fn collect(&mut self, engine: &mut Engine) {
@@ -404,8 +409,7 @@ impl<'a> Atomic<'a> {
         engine.set_command_version(Version::Resp2);
     }
     pub fn data(&mut self, args: &[Bytes]) -> io::Result<Resp> {
-        let _cpu = (self.invocation.is_none() && !self.cpu_nested)
-            .then(|| CpuCharge::new(self.session.clone()));
+        let _cpu = (self.invocation.is_none() && !self.cpu_nested).then(|| self.cpu_charge());
         if let Some(prepared) = self
             .server
             .as_ref()
@@ -420,30 +424,31 @@ impl<'a> Atomic<'a> {
             self.cpu_nested = previous;
             return reply;
         }
-        if let Err(reply) = Engine::validate(args) {
+        let mut command = BoundCommand::bind(args);
+        if let Err(reply) = command.check() {
             return Ok(reply);
         }
         if self.stale
             && !self
                 .invocation
                 .is_some_and(|context| context.flags.allow_stale)
-            && !Engine::is_control(args)
+            && !command.is_control()
         {
             return Ok(Resp::Error(
                 "LOADING replica initial synchronization is not complete".into(),
             ));
         }
-        if self.invocation.is_some() && !Engine::script_allowed(args) {
+        if self.invocation.is_some() && !command.script_allowed() {
             return Ok(Resp::Error(
                 "ERR command is not allowed from a script".into(),
             ));
         }
-        if self.in_transaction && !Engine::transaction_allowed(args) {
+        if self.in_transaction && !command.transaction_allowed() {
             return Ok(Resp::Error(
                 "ERR Command not allowed inside a transaction".into(),
             ));
         }
-        let dataset_write = Engine::is_dataset_write(args);
+        let dataset_write = command.is_dataset_write();
         if dataset_write && self.module_readonly {
             return Ok(Resp::Error(
                 "ERR write command called from a read-only module command".into(),
@@ -458,7 +463,7 @@ impl<'a> Atomic<'a> {
                 "READONLY You can't write against a read only replica.".into(),
             ));
         }
-        if let Err(reply) = self.authorize(args) {
+        if let Err(reply) = self.authorize(&mut command) {
             return Ok(reply);
         }
         if self
@@ -473,7 +478,7 @@ impl<'a> Atomic<'a> {
             && self
                 .invocation
                 .is_some_and(|context| !context.flags.allow_cross_slot_keys)
-            && Engine::any_accessed_key(args, |_| false)
+            && command.any_accessed_key(|_| false)
         {
             return Ok(Resp::Error(
                 "ERR Script attempted to access keys that do not hash to the same slot".into(),
@@ -481,14 +486,14 @@ impl<'a> Atomic<'a> {
         }
         if self.cluster
             && self.invocation.is_some()
-            && let Err(reply) = self.admit_script_keys(&Engine::accessed_keys(args), dataset_write)
+            && let Err(reply) = self.admit_script_keys(&command.accessed_keys(), dataset_write)
         {
             return Ok(reply);
         }
         if !self
             .invocation
             .is_some_and(|context| context.flags.allow_oom || context.readonly)
-            && let Some(reply) = self.admission.reject_pressure(args)
+            && let Some(reply) = self.admission.reject_pressure(&command)
         {
             return Ok(reply);
         }
@@ -533,23 +538,23 @@ impl<'a> Atomic<'a> {
             .map_or(0, |session| session.database());
         self.paused.select_database(database);
         if args[0].eq_ignore_ascii_case(b"MIGRATE") {
-            return self.migrate(args);
+            return self.migrate(&command);
         }
         if args[0].eq_ignore_ascii_case(b"SWAPDB") {
-            return self.swap_databases(args);
+            return self.swap_databases(&mut command);
         }
         if args[0].eq_ignore_ascii_case(b"SORT") || args[0].eq_ignore_ascii_case(b"SORT_RO") {
-            return self.sort(args);
+            return self.sort(&mut command);
         }
-        let execution = match Engine::routing(args, self.paused.engines.len()) {
+        let execution = match command.routing(self.paused.engines.len()) {
             Routing::Local { shard, .. } => {
                 if self.invocation.is_some_and(|context| context.rollback) {
                     let mut engine = self
                         .paused
-                        .take_keys(&Engine::accessed_keys(args), self.recording);
-                    self.context(&mut engine, args);
-                    self.capture_undo(&mut engine, args)?;
-                    let execution = engine.execute_at_time(args, self.now)?;
+                        .take_keys(&command.accessed_keys(), self.recording);
+                    self.context(&mut engine, &command);
+                    self.capture_undo(&mut engine, &command)?;
+                    let execution = engine.execute_at_time(&mut command, self.now)?;
                     self.collect(&mut engine);
                     self.paused.restore(engine);
                     execution
@@ -559,9 +564,9 @@ impl<'a> Atomic<'a> {
                     engine.set_command_user(self.user.clone());
                     engine.set_command_version(self.version);
                     engine.set_command_session(self.session.clone());
-                    engine.set_command_name(args);
+                    engine.set_command_name(&command);
                     engine.set_command_acl_context(audit_context);
-                    let execution = engine.execute_at_time(args, self.now)?;
+                    let execution = engine.execute_at_time(&mut command, self.now)?;
                     engine.finish_pending_search();
                     self.ready.extend(engine.take_ready_keys());
                     absorb(&mut self.batch, engine.take_batch());
@@ -575,9 +580,9 @@ impl<'a> Atomic<'a> {
                 keys.sort_unstable();
                 keys.dedup();
                 let mut engine = self.paused.take_keys(&keys, self.recording);
-                self.context(&mut engine, args);
-                self.capture_undo(&mut engine, args)?;
-                let execution = engine.execute_at_time(args, self.now)?;
+                self.context(&mut engine, &command);
+                self.capture_undo(&mut engine, &command)?;
+                let execution = engine.execute_at_time(&mut command, self.now)?;
                 self.collect(&mut engine);
                 self.paused.restore(engine);
                 execution
@@ -594,7 +599,7 @@ impl<'a> Atomic<'a> {
                     self.paused.select_database(database);
                     let mut routing = Engine::new();
                     routing.inherit_runtime(&self.paused.engines[0]);
-                    self.context(&mut routing, args);
+                    self.context(&mut routing, &command);
                     let plan = match routing.search_prepare(args, self.now) {
                         Ok(plan) => plan,
                         Err(reply) => return Ok(reply),
@@ -606,21 +611,20 @@ impl<'a> Atomic<'a> {
                     engine.search_set_plan(plan);
                     engine
                 } else {
-                    self.paused.take_related(args, self.recording, self.now)
+                    self.paused.take_related(&command, self.recording, self.now)
                 };
-                self.context(&mut engine, args);
-                self.capture_undo(&mut engine, args)?;
-                let execution = engine.execute_at_time(args, self.now)?;
+                self.context(&mut engine, &command);
+                self.capture_undo(&mut engine, &command)?;
+                let execution = engine.execute_at_time(&mut command, self.now)?;
                 self.collect(&mut engine);
                 self.paused.restore(engine);
                 execution
             }
-            Routing::Global(command) => {
-                if self.invocation.is_some_and(|context| context.rollback)
-                    && !Engine::is_readonly(args)
+            Routing::Global(global) => {
+                if self.invocation.is_some_and(|context| context.rollback) && !command.is_readonly()
                 {
                     let mut engine = self.paused.take_all(self.recording);
-                    self.capture_undo(&mut engine, args)?;
+                    self.capture_undo(&mut engine, &command)?;
                     self.paused.restore(engine);
                     self.paused.select_database(database);
                 }
@@ -629,14 +633,14 @@ impl<'a> Atomic<'a> {
                     engine.set_command_version(self.version);
                     engine.set_command_session(self.session.clone());
                 }
-                let (reply, batch) = if matches!(command, crate::engine::GlobalCommand::RandomKey) {
+                let (reply, batch) = if matches!(global, crate::engine::GlobalCommand::RandomKey) {
                     (
                         self.paused
                             .random_key(self.now, self.visible_slots.as_deref()),
                         None,
                     )
                 } else {
-                    self.paused.collect_global(command, args, self.now)?
+                    self.paused.collect_global(global, &mut command, self.now)?
                 };
                 absorb(&mut self.batch, batch);
                 for engine in &mut self.paused.engines {
@@ -645,8 +649,9 @@ impl<'a> Atomic<'a> {
                     engine.set_command_user(None);
                     engine.set_command_version(Version::Resp2);
                 }
-                self.persistence.note_reads(args, self.session.as_deref());
-                return Ok(self.visible_reply(command, reply));
+                self.persistence
+                    .note_reads(&command, self.session.as_deref());
+                return Ok(self.visible_reply(global, reply));
             }
             Routing::Maintenance => {
                 let Some(state) = self.state else {
@@ -664,7 +669,8 @@ impl<'a> Atomic<'a> {
                 ));
             }
         };
-        self.persistence.note_reads(args, self.session.as_deref());
+        self.persistence
+            .note_reads(&command, self.session.as_deref());
         Ok(match execution {
             Execution::Reply(reply) => reply,
             Execution::Pushed { reply, key } => {
@@ -676,13 +682,14 @@ impl<'a> Atomic<'a> {
         })
     }
 
-    fn sort(&mut self, args: &[Bytes]) -> io::Result<Resp> {
-        let mut keys = Engine::accessed_keys(args);
+    fn sort(&mut self, command: &mut BoundCommand<'_>) -> io::Result<Resp> {
+        let args = command.args();
+        let mut keys = command.accessed_keys();
         keys.sort_unstable();
         keys.dedup();
         let mut engine = self.paused.take_keys(&keys, self.recording);
-        self.context(&mut engine, args);
-        if let Err(error) = self.capture_undo(&mut engine, args) {
+        self.context(&mut engine, command);
+        if let Err(error) = self.capture_undo(&mut engine, command) {
             self.collect(&mut engine);
             self.paused.restore(engine);
             return Err(error);
@@ -702,14 +709,16 @@ impl<'a> Atomic<'a> {
         let undo_keys = &mut self.undo_keys;
         let undo_batches = &mut self.undo_batches;
         let mut failure = None;
-        let result = engine.execute_sort_with_lookup(args, now, |key, field, at| {
+        // Lookups name the SORT itself while `command` stays borrowed by it.
+        let named = command.clone();
+        let result = engine.execute_sort_with_lookup(command, now, |key, field, at| {
             let shard = Engine::shard_for(key, paused.engines.len());
             let owner = &mut paused.engines[shard];
             owner.set_recording(recording);
             owner.set_command_user(user.clone());
             owner.set_command_version(version);
             owner.set_command_session(session.clone());
-            owner.set_command_name(args);
+            owner.set_command_name(&named);
             owner.set_command_acl_context(audit_context);
             let value = if rollback {
                 capture_undo_key(owner, key, at, undo_keys, undo_batches)
@@ -740,18 +749,20 @@ impl<'a> Atomic<'a> {
         });
         self.collect(&mut engine);
         self.paused.restore(engine);
-        self.persistence.note_reads(args, self.session.as_deref());
+        self.persistence
+            .note_reads(command, self.session.as_deref());
         if let Some(error) = failure {
             return Err(error);
         }
         result
     }
     pub fn script(&mut self, args: &[Bytes], scripts: &mut ScriptRunner) -> io::Result<Resp> {
-        let _cpu = CpuCharge::new(self.session.clone());
-        if let Err(reply) = Engine::validate(args) {
+        let _cpu = self.cpu_charge();
+        let mut command = BoundCommand::bind(args);
+        if let Err(reply) = command.check() {
             return Ok(reply);
         }
-        if let Err(reply) = self.authorize(args) {
+        if let Err(reply) = self.authorize(&mut command) {
             return Ok(reply);
         }
         if args[0].eq_ignore_ascii_case(b"SCRIPT")
@@ -781,7 +792,7 @@ impl<'a> Atomic<'a> {
             return Ok(Resp::Simple("OK"));
         }
         if args[0].eq_ignore_ascii_case(b"SCRIPT") || args[0].eq_ignore_ascii_case(b"FUNCTION") {
-            if let Some(reply) = self.admission.reject(args) {
+            if let Some(reply) = self.admission.reject(&command) {
                 return Ok(reply);
             }
             if let Some(reply) = scripts.control(args) {
@@ -821,7 +832,7 @@ impl<'a> Atomic<'a> {
         }
         if !context.flags.allow_oom
             && !context.readonly
-            && let Some(reply) = self.admission.reject_pressure(args)
+            && let Some(reply) = self.admission.reject_pressure(&command)
         {
             return Ok(reply);
         }
@@ -833,7 +844,7 @@ impl<'a> Atomic<'a> {
         let previous_context = self.invocation.replace(context);
         self.control = Some(scripts.execution_control());
         self.script_slot = None;
-        for key in Engine::accessed_keys(args) {
+        for key in command.accessed_keys() {
             let slot = crate::cluster::key_slot(&key);
             if self.cluster && self.script_slot.is_some_and(|previous| previous != slot) {
                 self.session = previous_session;
@@ -976,8 +987,7 @@ impl<'a> Atomic<'a> {
                 "READONLY You can't write against a read only replica.".into(),
             ));
         }
-        let _cpu = (!self.cpu_nested && self.invocation.is_none())
-            .then(|| CpuCharge::new(self.session.clone()));
+        let _cpu = (!self.cpu_nested && self.invocation.is_none()).then(|| self.cpu_charge());
         let previous_cpu_nested = std::mem::replace(&mut self.cpu_nested, true);
         let previous_readonly = self.module_readonly;
         self.module_readonly |= !invocation.is_write();
@@ -1000,21 +1010,22 @@ impl<'a> Atomic<'a> {
         }
     }
 
-    fn swap_databases(&mut self, args: &[Bytes]) -> io::Result<Resp> {
+    fn swap_databases(&mut self, command: &mut BoundCommand<'_>) -> io::Result<Resp> {
+        let args = command.args();
         let debug = self.invocation.is_some_and(|context| context.rollback);
         let audit_context = self.audit_context();
         for (index, engine) in self.paused.engines.iter_mut().enumerate() {
             engine.set_command_user(self.user.clone());
             engine.set_command_version(self.version);
             engine.set_command_session(self.session.clone());
-            engine.set_command_name(args);
+            engine.set_command_name(command);
             engine.set_command_acl_context(audit_context);
             engine.set_recording(self.recording && index == 0);
             if index != 0 {
                 engine.set_watch_notifications(false);
             }
             engine.set_search_reindexing(false);
-            let execution = engine.execute_at_time(args, self.now);
+            let execution = engine.execute_at_time(command, self.now);
             if execution.is_err() {
                 engine.set_search_reindexing(true);
             }
@@ -1091,14 +1102,15 @@ impl<'a> Atomic<'a> {
         Ok(Resp::Simple("OK"))
     }
 
-    fn migrate(&mut self, args: &[Bytes]) -> io::Result<Resp> {
+    fn migrate(&mut self, command: &BoundCommand<'_>) -> io::Result<Resp> {
+        let args = command.args();
         let options = match crate::migrate::parse(args) {
             Ok(options) => options,
             Err(reply) => return Ok(reply),
         };
         let mut engine = self.paused.take_keys(&options.keys, self.recording);
-        self.context(&mut engine, args);
-        self.capture_undo(&mut engine, args)?;
+        self.context(&mut engine, command);
+        self.capture_undo(&mut engine, command)?;
         let items = match engine.prepare_migrate(&options.keys, self.now) {
             Ok(items) => items,
             Err(reply) => {
@@ -1129,10 +1141,11 @@ impl<'a> Atomic<'a> {
     }
 
     pub async fn server_command(&mut self, args: &[Bytes], state: &State) -> io::Result<Resp> {
-        if let Err(reply) = Engine::validate(args) {
+        let mut command = BoundCommand::bind(args);
+        if let Err(reply) = command.check() {
             return Ok(reply);
         }
-        if self.in_transaction && !Engine::transaction_allowed(args) {
+        if self.in_transaction && !command.transaction_allowed() {
             return Ok(Resp::Error(
                 "ERR Command not allowed inside a transaction".into(),
             ));
@@ -1140,7 +1153,7 @@ impl<'a> Atomic<'a> {
         if args[0].eq_ignore_ascii_case(b"MIGRATE") {
             return self.data(args);
         }
-        if let Err(reply) = self.authorize(args) {
+        if let Err(reply) = self.authorize(&mut command) {
             return Ok(reply);
         }
         let cluster_command = args[0].eq_ignore_ascii_case(b"CLUSTER");
@@ -1157,7 +1170,7 @@ impl<'a> Atomic<'a> {
             engine.set_command_user(self.user.clone());
             engine.set_command_version(self.version);
             engine.set_command_session(self.session.clone());
-            engine.set_command_name(args);
+            engine.set_command_name(&command);
             engine.set_command_acl_context(audit_context);
         }
         let result = if cluster_command {
@@ -1175,7 +1188,7 @@ impl<'a> Atomic<'a> {
             )
             .await?
         } else {
-            crate::server_runtime::execute_paused(args, self.paused, self.persistence, state)
+            crate::server_runtime::execute_paused(&command, self.paused, self.persistence, state)
                 .await?
         };
         for engine in &mut self.paused.engines {
@@ -1190,7 +1203,8 @@ impl<'a> Atomic<'a> {
         for engine in &mut self.paused.engines {
             engine.set_recording(self.recording);
         }
-        self.persistence.note_reads(args, self.session.as_deref());
+        self.persistence
+            .note_reads(&command, self.session.as_deref());
         self.admission.read_only = state.is_replica();
         self.stale = state.is_replica() && !state.replica_ready();
         if cluster_command {
@@ -1250,9 +1264,10 @@ impl<'a> Atomic<'a> {
             } else if args[0].eq_ignore_ascii_case(b"WAIT")
                 || args[0].eq_ignore_ascii_case(b"WAITAOF")
             {
-                if let Err(reply) = Engine::validate(args) {
+                let mut command = BoundCommand::bind(args);
+                if let Err(reply) = command.check() {
                     reply
-                } else if let Err(reply) = self.authorize(args) {
+                } else if let Err(reply) = self.authorize(&mut command) {
                     reply
                 } else if let Some(native) = state.native.get() {
                     let offset = self.session.as_ref().map_or(0, |session| {
@@ -1281,9 +1296,10 @@ impl<'a> Atomic<'a> {
                 .iter()
                 .any(|name| args[0].eq_ignore_ascii_case(name))
             {
-                if let Err(reply) = Engine::validate(args) {
+                let mut command = BoundCommand::bind(args);
+                if let Err(reply) = command.check() {
                     reply
-                } else if let Err(reply) = self.authorize(args) {
+                } else if let Err(reply) = self.authorize(&mut command) {
                     reply
                 } else {
                     self.commit_prefix().await?;
@@ -1312,12 +1328,12 @@ impl<'a> Atomic<'a> {
                     self.stale = state.is_replica() && !state.replica_ready();
                     reply
                 }
-            } else if matches!(Engine::routing(args, 1), Routing::Scripting) {
-                self.script(args, scripts)?
-            } else if matches!(Engine::routing(args, 1), Routing::Maintenance) {
-                self.server_command(args, state).await?
             } else {
-                self.data(args)?
+                match BoundCommand::bind(args).routing(1) {
+                    Routing::Scripting => self.script(args, scripts)?,
+                    Routing::Maintenance => self.server_command(args, state).await?,
+                    _ => self.data(args)?,
+                }
             };
             self.functions_changed(revision, scripts);
             replies.push(reply);
@@ -1375,8 +1391,12 @@ mod tests {
     #[tokio::test]
     async fn lua_hash_import_definitions_are_invocation_local_but_exec_uses_the_client_session() {
         let persistence = Arc::new(Persistence::new(None));
-        let (pool, mut workers) =
-            crate::sharding::Pool::start(Engine::new(), 2, persistence.clone());
+        let (pool, mut workers) = crate::sharding::Pool::start(
+            Engine::new(),
+            2,
+            persistence.clone(),
+            Arc::new(State::new(0, 2, false)),
+        );
         let state = State::new(0, 2, false);
         let session = Arc::new(ClientSession::new(51));
         session.set_database(1);

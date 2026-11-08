@@ -394,6 +394,11 @@ Feature: Bounded Lua scripts and durable named function libraries
       """
     When I execute:
       """
+      ["GET","debugged"]
+      """
+    Then the reply is an error with code "BUSY"
+    When I execute:
+      """
       ["SCRIPT","KILL"]
       """
     Then the reply equals:

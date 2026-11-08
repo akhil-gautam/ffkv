@@ -1,8 +1,8 @@
 //! Redis HYLL wire format; algorithm references: Redis 7.2's published format
 //! and Otmar Ertl, arXiv:1702.01284, improved raw estimator (Algorithm 6).
 //! Implemented independently from the format and mathematical definitions.
-use super::{CommandSpec, Engine, Mutation, Resp, Value, error};
-use bytes::{Bytes, BytesMut};
+use super::{CommandSpec, Engine, Mutation, Resp, StringBuffer, StringWrite, Value, error};
+use bytes::Bytes;
 
 const REGISTERS: usize = 1 << 14;
 const HEADER: usize = 16;
@@ -114,12 +114,12 @@ fn validate(value: &[u8]) -> Result<(), Resp> {
         visit(value, |_, _| {})
     }
 }
-fn empty() -> BytesMut {
-    let mut value = BytesMut::zeroed(DENSE_SIZE);
+fn empty() -> StringBuffer {
+    let mut value = StringBuffer::zeroed(DENSE_SIZE);
     value[..4].copy_from_slice(b"HYLL");
     value
 }
-fn densify(value: &mut BytesMut) {
+fn densify(value: &mut StringBuffer) {
     if value.is_empty() {
         *value = empty();
     } else if value[4] == 1 {
@@ -129,8 +129,10 @@ fn densify(value: &mut BytesMut) {
         *value = dense;
     }
 }
-fn sparsify(value: &mut BytesMut) {
-    let mut sparse = BytesMut::with_capacity(HEADER + 256);
+fn sparsify(value: &mut StringBuffer) {
+    // At most 3000 bytes plus one two-byte opcode; rejected encodings need no
+    // allocation, and successful ones get exact-sized stored memory below.
+    let mut sparse = smallvec::SmallVec::<[u8; 4096]>::new();
     sparse.extend_from_slice(&value[..HEADER]);
     sparse[4] = 1;
     let mut index = 0;
@@ -158,7 +160,9 @@ fn sparsify(value: &mut BytesMut) {
         }
         index = end;
     }
-    *value = sparse;
+    let mut encoded = StringBuffer::with_capacity(sparse.len());
+    encoded.extend_from_slice(&sparse);
+    *value = encoded;
 }
 
 // MurmurHash64A specifies wrapping 64-bit arithmetic and little-endian words.
@@ -299,7 +303,7 @@ fn selftest() -> Result<(), &'static str> {
             }
         }
     }
-    let mut sparse = BytesMut::zeroed(HEADER);
+    let mut sparse = StringBuffer::zeroed(HEADER);
     sparse[..4].copy_from_slice(b"HYLL");
     sparse[4] = 1;
     sparse.extend_from_slice(&[0x7f, 0xff]);
@@ -373,15 +377,18 @@ impl Engine {
         // GETREG, like TODENSE, normalizes a sparse representation. Preserve
         // its cached cardinality and expiry; journal only an actual conversion.
         if sparse {
-            let (mut value, deadline) = self.string_buffer(&args[2]);
+            let (mut value, deadline) = self.string_buffer(&args[2], 0);
             densify(&mut value);
-            let value = value.freeze();
-            self.record_change(now, false, || Mutation::Set {
-                key: args[2].clone(),
-                value: value.clone(),
-                expires_at: deadline,
-            });
-            self.store_value(&args[2], value, deadline);
+            let capture = self.capturing_changes();
+            if let Some(value) =
+                self.store_value(&args[2], StringWrite::Buffer(value), deadline, capture)
+            {
+                self.record_change(now, false, || Mutation::Set {
+                    key: args[2].clone(),
+                    value,
+                    expires_at: deadline,
+                });
+            }
         }
         if operation.eq_ignore_ascii_case(b"TODENSE") {
             return Resp::Integer(i64::from(sparse));
@@ -389,6 +396,7 @@ impl Engine {
         let Some(Value::String(value)) = self.value(&args[2], now) else {
             unreachable!("validated HyperLogLog");
         };
+        let value = value.bytes();
         super::array(
             (0..REGISTERS)
                 .map(|index| Resp::Integer(register(value, index) as i64))
@@ -399,6 +407,7 @@ impl Engine {
     fn hll(&mut self, key: &Bytes, now: i64) -> Result<Option<&Bytes>, Resp> {
         match self.value(key, now) {
             Some(Value::String(value)) => {
+                let value = value.bytes();
                 validate(value)?;
                 Ok(Some(value))
             }
@@ -416,6 +425,7 @@ impl Engine {
             let Some(Value::String(value)) = self.value(&args[1], now) else {
                 unreachable!()
             };
+            let value = value.bytes();
             if value[4] == 0
                 && !args[2..].iter().any(|element| {
                     let h = hash(element);
@@ -440,7 +450,7 @@ impl Engine {
                 return Resp::Integer(0);
             }
         }
-        let (mut value, deadline) = self.string_buffer(&args[1]);
+        let (mut value, deadline) = self.string_buffer(&args[1], 0);
         densify(&mut value);
         let mut changed = !present;
         for element in &args[2..] {
@@ -457,9 +467,9 @@ impl Engine {
             if was_sparse {
                 sparsify(&mut value);
             }
-            self.store(&args[1], value.freeze(), deadline, now);
+            self.store(&args[1], StringWrite::Buffer(value), deadline, now);
         } else {
-            self.store_value(&args[1], value.freeze(), deadline);
+            self.store_value(&args[1], StringWrite::Buffer(value), deadline, false);
         }
         Resp::Integer(i64::from(changed))
     }
@@ -480,15 +490,18 @@ impl Engine {
                     }
                 }
             };
-            let (mut value, deadline) = self.string_buffer(&args[1]);
+            let (mut value, deadline) = self.string_buffer(&args[1], 0);
             value[8..16].copy_from_slice(&(result as u64).to_le_bytes());
-            let value = value.freeze();
-            self.record_change(now, false, || Mutation::Set {
-                key: args[1].clone(),
-                value: value.clone(),
-                expires_at: deadline,
-            });
-            self.store_value(&args[1], value, deadline);
+            let capture = self.capturing_changes();
+            if let Some(value) =
+                self.store_value(&args[1], StringWrite::Buffer(value), deadline, capture)
+            {
+                self.record_change(now, false, || Mutation::Set {
+                    key: args[1].clone(),
+                    value,
+                    expires_at: deadline,
+                });
+            }
             return Resp::Integer(result);
         }
         let mut union = [0u8; REGISTERS];
@@ -522,13 +535,13 @@ impl Engine {
                 Err(reply) => return reply,
             }
         }
-        let (mut value, deadline) = self.string_buffer(&args[1]);
+        let (mut value, deadline) = self.string_buffer(&args[1], 0);
         densify(&mut value);
         for (i, count) in union.into_iter().enumerate() {
             set_register(&mut value, i, count);
         }
         value[15] |= 128;
-        self.store(&args[1], value.freeze(), deadline, now);
+        self.store(&args[1], StringWrite::Buffer(value), deadline, now);
         Resp::Simple("OK")
     }
 }
@@ -601,7 +614,7 @@ mod tests {
     }
     #[test]
     fn sparse_import_and_malformed_runs_are_checked() {
-        let mut value = BytesMut::zeroed(16);
+        let mut value = bytes::BytesMut::zeroed(16);
         value[..4].copy_from_slice(b"HYLL");
         value[4] = 1;
         value.extend_from_slice(&[0x7f, 0xff]);
@@ -692,11 +705,11 @@ mod tests {
         for index in [0, 1, 3, 63, 64, 65, REGISTERS - 1] {
             set_register(&mut value, index, 17);
         }
-        let original = value.clone();
+        let original = value.to_vec();
         sparsify(&mut value);
         assert_eq!(value[4], 1);
         densify(&mut value);
-        assert_eq!(value, original);
+        assert_eq!(&value[..], &original[..]);
         let mut engine = Engine::new();
         run(&mut engine, &["PFADD", "h"]);
         assert_eq!(

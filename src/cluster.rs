@@ -600,6 +600,10 @@ impl ClusterRuntime {
         }
         Ok(Some(slot))
     }
+    /// Whether slot statistics account command CPU time; fixed at startup.
+    pub fn cpu_stats(&self) -> bool {
+        self.config.cpu_stats
+    }
     pub fn record(&self, slot: u16, cpu_usec: u64, bytes_in: u64, bytes_out: u64) {
         let m = &self.metrics[slot as usize];
         if self.config.cpu_stats {
