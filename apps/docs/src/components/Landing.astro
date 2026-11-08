@@ -21,6 +21,20 @@ const icons: Record<string, string> = {
 };
 const session = `target/release/ffkv-cli -p 6382 PING\n# PONG\n\ntarget/release/ffkv-cli -p 6382 SET hello "ffkv"\n# OK\n\ntarget/release/ffkv-cli -p 6382 GET hello\n# ffkv`;
 const start = `cargo build --release --bins\ntarget/release/ffkv --bind 127.0.0.1:6382 \\\n  --data-dir ./ffkv-docs-data --durability strict`;
+const container = `docker run -d --name ffkv -p 6379:6379 \\\n  -v ffkv-data:/var/lib/ffkv ghcr.io/akhil-gautam/ffkv\n\ndocker exec ffkv ffkv-cli PING\n# PONG`;
+// Medians from benchmarks/results/dragonfly-vs-ffkv-2026-11-03/wave7b-analysis.json
+// (32 clients, pipeline 16, four server CPUs, memory-only).
+const results = [
+  { workload: 'GET 256 B', ffkv: '2.94M', dragonfly: '2.60M', redis: '2.08M', ratio: '1.13×' },
+  { workload: 'SET 256 B', ffkv: '2.63M', dragonfly: '2.43M', redis: '1.74M', ratio: '1.09×' },
+  { workload: 'GET 4 KiB', ffkv: '1.84M', dragonfly: '1.16M', redis: '0.80M', ratio: '1.59×' },
+  { workload: 'SET 4 KiB', ffkv: '1.64M', dragonfly: '1.10M', redis: '0.49M', ratio: '1.50×' },
+  { workload: 'INCR', ffkv: '3.08M', dragonfly: '2.97M', redis: '2.08M', ratio: '1.04×' },
+  { workload: 'HGET', ffkv: '2.83M', dragonfly: '2.60M', redis: '1.69M', ratio: '1.09×' },
+  { workload: 'HSET', ffkv: '2.63M', dragonfly: '2.45M', redis: '1.51M', ratio: '1.07×' },
+  { workload: 'ZADD', ffkv: '2.40M', dragonfly: '1.84M', redis: '0.55M', ratio: '1.31×' },
+  { workload: 'ZRANGE (10)', ffkv: '1.79M', dragonfly: '1.49M', redis: '1.09M', ratio: '1.20×' },
+];
 ---
 <div class="landing">
   <section class="landing-hero" aria-labelledby="_top">
@@ -44,7 +58,7 @@ const start = `cargo build --release --bins\ntarget/release/ffkv --bind 127.0.0.
   <div class="capability-strip" aria-label="Product scope">
     <div><strong>{catalog.commands.length}</strong><span>catalog commands</span></div>
     <div><strong>19</strong><span>data-type families</span></div>
-    <div><strong>Rust <span class="plus">+</span> Tokio</strong><span>sharded actor execution</span></div>
+    <div><strong>27<span class="plus">/</span>27</strong><span>matched cases faster than Dragonfly</span></div>
     <a href={docsLink('concepts/compatibility/')}><span class="scope-label">Know the scope</span><span>Read the compatibility contract <span aria-hidden="true">↗</span></span></a>
   </div>
 
@@ -59,9 +73,23 @@ const start = `cargo build --release --bins\ntarget/release/ffkv --bind 127.0.0.
     </div>
   </section>
 
+  <section class="perf-section" aria-labelledby="perf-title">
+    <div class="section-kicker">MEASURED, NOT CLAIMED</div>
+    <div class="section-heading"><h2 id="perf-title">Faster than Dragonfly in every matched case.</h2><p>Commands per second · 32 clients · pipeline 16 · 4 server CPUs</p></div>
+    <div class="perf-table" role="region" aria-label="Benchmark results" tabindex="0">
+      <table>
+        <thead><tr><th scope="col">Workload</th><th scope="col">ffkv</th><th scope="col">Dragonfly 2.0.2</th><th scope="col">Redis 8.2.1</th><th scope="col">vs Dragonfly</th></tr></thead>
+        <tbody>
+          {results.map((row) => <tr><th scope="row">{row.workload}</th><td class="perf-ffkv">{row.ffkv}</td><td>{row.dragonfly}</td><td>{row.redis}</td><td class="perf-ratio">{row.ratio}</td></tr>)}
+        </tbody>
+      </table>
+    </div>
+    <p class="perf-note">Across nine workloads and three client profiles, ffkv was faster than Dragonfly in 27 of 27 cases and faster than Redis in 18 of 27. With a single client, single-threaded Redis stays 0.5–4% ahead. All engines ran memory-only in one ARM64 Linux VM with <code>redis-benchmark</code> on separate CPUs. Each figure is the median of two runs, with every trial checked for correctness. <a href={docsLink('contributing/benchmarks/')}>Method, every table and raw data <span aria-hidden="true">→</span></a></p>
+  </section>
+
   <section class="start-section" aria-labelledby="start-title">
-    <div><div class="section-kicker">LOCAL FIRST. CLI FIRST.</div><h2 id="start-title">A fresh instance.<br />A clean starting point.</h2><p>Run these commands from the repository root. Port 6382 and a separate data directory keep this example away from an existing instance.</p><a class="text-link" href={docsLink('getting-started/installation/')}>Check prerequisites and installation <span aria-hidden="true">→</span></a></div>
-    <Code code={start} lang="sh" title="Terminal 1 · start ffkv" />
+    <div><div class="section-kicker">ONE COMMAND TO START</div><h2 id="start-title">A fresh instance.<br />A clean starting point.</h2><p>The published image runs on amd64 and arm64. Durable <code>strict</code> mode is on by default. TLS and an <code>admin</code> password are generated on first start and kept in the data volume.</p><a class="text-link" href={docsLink('deployment/docker/')}>Docker guide: passwords, certificates, Compose <span aria-hidden="true">→</span></a><br /><a class="text-link" href={docsLink('getting-started/installation/')}>Prefer source? Check prerequisites and installation <span aria-hidden="true">→</span></a></div>
+    <div class="start-code"><Code code={container} lang="sh" title="Docker" /><Code code={start} lang="sh" title="From source · repository root" /></div>
   </section>
 
   <section class="contract-note" aria-labelledby="contract-title">

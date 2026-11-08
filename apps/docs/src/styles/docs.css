@@ -153,6 +153,20 @@ body:has(.landing) { --sl-content-width: 76rem; }
 .sl-markdown-content .landing .start-section p { color: var(--docs-muted); font-size: .85rem; margin-top: 1rem; margin-bottom: 1.15rem; max-width: 45ch; }
 .start-section .expressive-code { min-width: 0; }
 .text-link { font-size: .78rem; color: var(--docs-lime); }
+.start-code { display: flex; flex-direction: column; gap: 1rem; min-width: 0; }
+.perf-section { padding-top: 3.5rem; }
+.perf-table { overflow-x: auto; border: 1px solid var(--docs-line); border-radius: .65rem; background: var(--docs-surface); }
+.sl-markdown-content .landing .perf-table table { width: 100%; margin: 0; border-collapse: collapse; display: table; font-size: .82rem; }
+.sl-markdown-content .landing .perf-table th, .sl-markdown-content .landing .perf-table td { padding: .6rem 1rem; border: 0; border-bottom: 1px solid var(--docs-line); text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.sl-markdown-content .landing .perf-table tbody tr:last-child > * { border-bottom: 0; }
+.sl-markdown-content .landing .perf-table th:first-child { text-align: left; }
+.sl-markdown-content .landing .perf-table thead th { color: var(--docs-faint); font-weight: 500; font-size: .7rem; letter-spacing: .04em; background: transparent; }
+.sl-markdown-content .landing .perf-table tbody th { font-weight: 500; color: var(--docs-ink); }
+.perf-table td { color: var(--docs-muted); }
+.perf-table .perf-ffkv { color: var(--docs-ink); font-weight: 600; }
+.perf-table .perf-ratio { color: var(--docs-lime); font-weight: 600; }
+.sl-markdown-content .landing .perf-note { font-size: .78rem; line-height: 1.8; color: var(--docs-muted); margin-top: 1rem; max-width: 95ch; }
+.perf-note a { color: var(--docs-lime); }
 .contract-note { display: flex; gap: 1rem; border: 1px solid var(--docs-line); border-left: 3px solid var(--docs-lime); border-radius: .5rem; padding: 1.4rem; background: var(--docs-surface); }
 .contract-note > svg { color: var(--docs-lime); flex: none; margin-top: .15rem; }
 .sl-markdown-content .landing .contract-note h2 { font-size: .95rem; font-weight: 600; letter-spacing: -.01em; }
