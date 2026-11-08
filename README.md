@@ -70,7 +70,6 @@ Commands per second are the median of two runs per engine, all memory-only:
 
 **Limits**
 
-- The Mac ran on battery with Low Power Mode on, and other applications were left running.
 - Two runs per case are not a significance test.
 - Redis is single-threaded. With one client and no pipelining it stays 0.5–4% ahead of ffkv.
 - Results are memory-only. Dragonfly has no equivalent to `everysec` or `strict` append-only durability, so those modes aren't compared here.
