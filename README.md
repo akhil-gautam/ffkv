@@ -29,6 +29,28 @@ logs, a RAM/SSD hybrid mode, native leased jobs and a management console.
 
 ## Quickstart
 
+### Docker
+
+```sh
+docker run -d --name ffkv -p 6379:6379 -v ffkv-data:/var/lib/ffkv ghcr.io/akhil-gautam/ffkv
+docker exec ffkv ffkv-cli PING                        # PONG
+docker exec ffkv ffkv-cli SET greeting 'hello ffkv'   # OK
+```
+
+The image runs on amd64 and arm64, uses durable `strict` mode, and generates TLS
+and an `admin` password on first start, stored in the volume. To connect from your machine:
+
+```sh
+docker cp ffkv:/var/lib/ffkv/docker/ca.crt ./ffkv-ca.crt
+REDISCLI_AUTH="$(docker exec ffkv cat /var/lib/ffkv/docker/admin-password)" \
+  redis-cli --tls --cacert ./ffkv-ca.crt --user admin PING
+```
+
+Settings such as your own password, extra certificate names and Compose with
+the web console are covered in the [Docker guide](https://ffkv.pages.dev/deployment/docker/).
+
+### From source
+
 You need Rust 1.99 or newer and a C toolchain. No Redis installation is required.
 
 ```sh

@@ -1,19 +1,66 @@
 ---
 title: Docker and Compose
-description: Use the repository's hardened single-node Compose workflow, understand its bind-mounted secrets, and account for the current image-packaging caveat.
+description: Run the published multi-arch ffkv image, or the hardened Compose workflow with the management console.
 ---
 
-The existing `deploy/compose.yaml` runs one TLS/ACL-protected ffkv server with the React management console. It is not a cluster deployment. The Rust server/console image is separate from the [static documentation-site deployment](/deployment/documentation/).
+Two container options run one single-node ffkv server; neither is a cluster deployment:
 
-:::caution[Current image-packaging caveat]
-The repository Dockerfile's Rust stage copies `Cargo.toml`, `Cargo.lock` and `src/`, but **omits root `build.rs`**, which compiles the native module-call shim in `src/server_commands/extensions/call.c`. This is a source-packaging discrepancy: the documented build workflow below is the existing workflow, **not a claim that the current image was successfully built or run**. Review/correct that packaging in the server project before relying on a fresh image. A [native source installation](/getting-started/installation/) includes the build script and avoids this container packaging omission. No Docker daemon is needed for the documentation site.
-:::
+- **Published image** (`ghcr.io/akhil-gautam/ffkv`): one `docker run`, with TLS and ACL credentials generated on first start.
+- **Compose workflow** (`deploy/compose.yaml`): adds the React management console, hybrid storage and externally managed secrets.
 
-## Prerequisites
+Both are separate from the [static documentation-site deployment](/deployment/documentation/).
 
-Use a nonroot host account, Python 3, OpenSSL, Docker with Compose support, and an image/build environment whose server packaging has been addressed. Choose a **new** configuration directory. Bootstrap refuses any existing destination and stores credentials in private files, never output or command arguments. Production deployments need your PKI and secret-management policy rather than its 30-day development certificate.
+## Published image
 
-## Existing workflow
+```sh
+docker run -d --name ffkv -p 6379:6379 -v ffkv-data:/var/lib/ffkv ghcr.io/akhil-gautam/ffkv:latest
+docker exec ffkv ffkv-cli PING          # PONG
+docker exec ffkv ffkv-cli SET greeting hello
+```
+
+Images are built for `linux/amd64` and `linux/arm64`. They are tagged `latest` from `main`, `X.Y.Z` and `X.Y` from release tags, and `sha-<commit>` for every published build.
+
+ffkv never serves RESP on a non-loopback address without TLS and an ACL. On first start, the entrypoint therefore creates the following in the volume under `/var/lib/ffkv/docker/`:
+
+| File | Contents |
+| --- | --- |
+| `admin-password` | Random password for user `admin`, with all commands, keys and channels |
+| `users.acl` | `default` disabled, `admin`, and a `health` user that may only `PING` |
+| `ca.crt`, `tls.crt`, `tls.key` | Self-signed certificate for `localhost`, `ffkv`, `127.0.0.1` and `::1`, valid for 825 days |
+
+These files persist with the volume, so a new container on the same volume keeps the same password and certificate. The certificate is regenerated when its names change or fewer than 30 days remain. Passwords are never logged. Read the admin password with `docker exec ffkv cat /var/lib/ffkv/docker/admin-password`.
+
+Inside the container, `ffkv-cli` with no connection options uses these generated credentials automatically. To connect from the host or another machine, use any TLS-capable Redis client with the generated CA:
+
+```sh
+docker cp ffkv:/var/lib/ffkv/docker/ca.crt ./ffkv-ca.crt
+REDISCLI_AUTH="$(docker exec ffkv cat /var/lib/ffkv/docker/admin-password)" \
+  redis-cli -p 6379 --tls --cacert ./ffkv-ca.crt --user admin PING
+```
+
+Plaintext connections are refused.
+
+| Setting | Purpose |
+| --- | --- |
+| `FFKV_PASSWORD` / `FFKV_PASSWORD_FILE` | Set the `admin` password instead of generating one; it is applied on every start |
+| `FFKV_TLS_SANS` | Extra comma-separated DNS names or IPs for the certificate, e.g. `db.example.com,10.0.0.5`, when clients connect by a name other than `localhost` |
+| `FFKV_DURABILITY` | `strict` (default) or `everysec` |
+| `FFKV_PORT` | Listener port inside the container, default `6379` |
+| Extra arguments | Appended to the server command, e.g. `docker run … ghcr.io/akhil-gautam/ffkv --storage hybrid --shards 16` |
+
+To use your own PKI and ACL, pass `--bind`, `--acl-file`, `--tls-cert` and `--tls-key` yourself with the files mounted. Any of these flags turns off generation, and the arguments go to `ffkv` unchanged. A first argument that is not a flag runs that program instead, e.g. `ffkv-cli` or `sh`. The image runs as UID/GID 10001. A host bind mount for `/var/lib/ffkv` must be writable by that user; named volumes already are. The image also contains `ffkv-mcp` and the console assets in `/opt/ffkv/console`.
+
+The self-signed certificate suits development and private networks. For production, provide certificates from your PKI and manage credentials with your secret store.
+
+To build the image yourself from the repository root, run `docker build -t ffkv:local .`. The build cross-compiles, so `docker buildx build --platform linux/amd64,linux/arm64 .` does not need emulation.
+
+## Compose workflow
+
+### Prerequisites
+
+Use a nonroot host account, Python 3, OpenSSL, and Docker with Compose support. Choose a **new** configuration directory. Bootstrap refuses any existing destination and stores credentials in private files, never output or command arguments. Production deployments need your PKI and secret-management policy rather than its 30-day development certificate.
+
+### Start
 
 From the repository root:
 
@@ -33,7 +80,7 @@ FFKV_RESP_PORT=6382 FFKV_MANAGEMENT_PORT=6383 \
 
 Do not start both variants concurrently. Keep the same overrides for subsequent lifecycle commands. The exact server command is in `deploy/compose.yaml`; it sets internal listeners 6379/8080, strict durability, hybrid storage, TLS/ACL/token policy, persistent audit journal and packaged console assets.
 
-## Probe and connect
+### Probe and connect
 
 For the default published port:
 
@@ -50,9 +97,9 @@ target/release/ffkv-cli --tls --cacert .ffkv-compose/ca.crt \
   -h localhost -p 6382 --user admin --askpass PING
 ```
 
-Supply the private admin password at the hidden prompt. Do not embed it in a URL or process arguments. The container image packages both `ffkv` and `ffkv-cli`, with `ffkv` as its default entrypoint; a plain `docker run IMAGE` is not the full Compose secret/management setup.
+Supply the private admin password at the hidden prompt. Do not embed it in a URL or process arguments. The Compose command passes its own `--bind`, `--acl-file` and TLS flags, so the image's entrypoint runs `ffkv` with exactly those arguments and generates nothing.
 
-## Settings and resource boundaries
+### Settings and resource boundaries
 
 | Environment variable | Compose default / purpose |
 | --- | --- |
@@ -70,7 +117,7 @@ The service uses the bootstrap owner's nonroot UID/GID, a read-only root filesys
 
 `FFKV_CONFIG_DIR/data` is a persistent **bind mount** at `/var/lib/ffkv`; the database is its `data` subdirectory and the audit journal is beside it. ACL/token/TLS/health files are read-only bind mounts with host-path auto-creation disabled. Preserve ownership and private permissions; bootstrap's owner mapping matters on native hosts.
 
-## Lifecycle and backups
+### Lifecycle and backups
 
 ```sh
 docker compose --env-file .ffkv-compose/compose.env -f deploy/compose.yaml ps

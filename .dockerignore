@@ -21,3 +21,6 @@ benchmarks
 ffkv-data
 ffkv-restored
 **/users.acl
+# Never drop Rust sources whose names match the secret patterns above
+# (for example src/cli/tokenize.rs).
+!src/**
