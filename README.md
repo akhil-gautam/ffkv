@@ -6,6 +6,7 @@
   <b>freaking fast KV</b>: a Redis-compatible datastore in Rust, built for queues and background jobs.<br>
   <a href="https://ffkv.pages.dev/">Handbook</a> ·
   <a href="https://ffkv.pages.dev/getting-started/quickstart/">Quickstart</a> ·
+  <a href="https://ffkv.pages.dev/playground/">Try it in your browser</a> ·
   <a href="https://ffkv.pages.dev/reference/commands/">Command reference</a> ·
   <a href="#performance">Benchmarks</a>
 </p>
@@ -28,6 +29,9 @@ logs, a RAM/SSD hybrid mode, native leased jobs and a management console.
 > before relying on it.
 
 ## Quickstart
+
+No install needed to look around: the [browser playground](https://ffkv.pages.dev/playground/)
+runs ffkv's real command engine in your browser via WebAssembly (in-memory only).
 
 ### Docker
 
@@ -176,7 +180,7 @@ More detail: [architecture](https://ffkv.pages.dev/concepts/architecture/).
 
 | I want to… | Read |
 | --- | --- |
-| Install and try it | [Installation](https://ffkv.pages.dev/getting-started/installation/), [Quickstart](https://ffkv.pages.dev/getting-started/quickstart/), [CLI](https://ffkv.pages.dev/getting-started/cli/) |
+| Install and try it | [Browser playground](https://ffkv.pages.dev/playground/), [Installation](https://ffkv.pages.dev/getting-started/installation/), [Quickstart](https://ffkv.pages.dev/getting-started/quickstart/), [CLI](https://ffkv.pages.dev/getting-started/cli/) |
 | Use a datatype | [Datatypes](https://ffkv.pages.dev/data-types/), [Command reference](https://ffkv.pages.dev/reference/commands/) |
 | Run jobs | [List queues](https://ffkv.pages.dev/guides/list-queues/), [Native jobs](https://ffkv.pages.dev/guides/native-jobs/), [Sidekiq](https://ffkv.pages.dev/guides/sidekiq/) |
 | Operate it | [Backup & restore](https://ffkv.pages.dev/operations/backup-restore/), [Replication](https://ffkv.pages.dev/operations/replication/), [Clustering](https://ffkv.pages.dev/operations/clustering/), [Observability](https://ffkv.pages.dev/operations/observability/) |
@@ -188,7 +192,7 @@ More detail: [architecture](https://ffkv.pages.dev/concepts/architecture/).
 ```sh
 cargo test --locked --all-targets
 cargo clippy --locked --all-targets -- -D warnings
-npm --prefix apps/docs ci && npm --prefix apps/docs run dev   # handbook at localhost:4321
+npm --prefix apps/docs ci && npm --prefix apps/docs run dev   # handbook at localhost:4321 (needs: rustup target add wasm32-wasip1)
 ```
 
 See [development](https://ffkv.pages.dev/contributing/development/),

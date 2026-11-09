@@ -8,6 +8,14 @@ under **Changed** or **Removed**.
 
 ## [Unreleased]
 
+### Added
+
+- Browser playground on the handbook: ffkv's command engine compiled to
+  WebAssembly (`wasm32-wasip1`, crate `crates/ffkv-wasm`), with two terminals
+  sharing one in-memory dataset, guided examples, and "Try in playground" links
+  on command reference pages. Lua scripting, persistence, replication,
+  networking and Chinese full-text segmentation are not available there.
+
 ## [0.1.0] - 2026-11-09
 
 First tagged alpha release.
