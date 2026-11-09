@@ -1,5 +1,0 @@
----
-import DefaultPageTitle from '@astrojs/starlight/components/PageTitle.astro';
-const isLanding = Astro.locals.starlightRoute.entry.data.template === 'splash';
----
-{!isLanding && <DefaultPageTitle {...Astro.props} />}

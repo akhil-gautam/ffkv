@@ -5,8 +5,8 @@ description: Deploy the existing single-node StatefulSet chart with an external 
 
 `deploy/helm/ffkv` installs **one StatefulSet replica**, a persistent volume claim, services, verified TLS AUTH probes, restricted security contexts and a NetworkPolicy. It does not provision a multi-node ffkv cluster or provide production HA. A rolling restart is downtime for this single node.
 
-:::caution[Image prerequisite]
-The current Dockerfile omits root `build.rs` from its Rust build stage, although that script builds the native module-call shim. The existing image-build commands below require that source-packaging issue to be addressed separately. They are **not recorded successful Docker/Kubernetes verification**. Use a correctly packaged image available to your cluster; [native installation](/getting-started/installation/) avoids this Dockerfile omission. The static [documentation deployment](/deployment/documentation/) does not depend on the server image.
+:::note[Server image]
+The chart's default image is a locally built `ffkv:0.1.0`. To use the published multi-arch image instead, install with `--set image.repository=ghcr.io/akhil-gautam/ffkv --set image.tag=latest`, or pin a `sha-<commit>` tag. The chart passes its own `--bind`, TLS and ACL arguments, so the image uses your mounted Secret and generates no credentials of its own; see the [Docker guide](/deployment/docker/). This Helm workflow has not been verified on a cluster.
 :::
 
 ## Prerequisites and Secret
@@ -38,7 +38,7 @@ helm upgrade --install ffkv deploy/helm/ffkv --namespace ffkv \
   --set existingSecret=ffkv-config
 ```
 
-These commands create a namespace/Secret and install real resources; do not run them against an unrelated cluster. Inspect your context first as part of your own deployment procedure. Existing namespace/Secret creation is not automatically idempotent. For another runtime, publish/load a correctly built image and set `image.repository`/`image.tag` (and `imagePullSecrets` where needed).
+These commands create a namespace/Secret and install real resources; do not run them against an unrelated cluster. Inspect your context first as part of your own deployment procedure. Existing namespace/Secret creation is not automatically idempotent. For another runtime, use the published image or load your own build, and set `image.repository`/`image.tag` (and `imagePullSecrets` where needed).
 
 ## TLS and local access
 

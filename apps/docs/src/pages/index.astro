@@ -1,0 +1,677 @@
+---
+import '@fontsource/instrument-serif/400.css';
+import '@fontsource-variable/geist';
+import '@fontsource-variable/geist-mono';
+import catalog from '../../../../src/command_catalog.json';
+import { docsLink } from '../lib/links';
+
+const title = 'ffkv — freaking fast KV, on every core';
+const description = 'ffkv is a durable, multi-core key-value datastore in Rust for caches, queues and background jobs. It speaks RESP and beat Dragonfly in all 27 matched benchmark cases.';
+const commands = catalog.commands.length;
+
+// Medians from benchmarks/results/dragonfly-vs-ffkv-2026-11-03/wave7b-analysis.json
+// [label, ffkv, Dragonfly 2.0.2, Redis 8.2.1] commands per second.
+const profiles = [
+  { id: 'p16', label: '32 clients · pipeline 16', rows: [
+    ['GET 256 B', 2941042, 2603375, 2082643], ['SET 256 B', 2634198, 2427828, 1736991],
+    ['GET 4 KiB', 1840583, 1155995, 795787], ['SET 4 KiB', 1641558, 1097966, 494416],
+    ['INCR', 3076196, 2971252, 2079936], ['HGET', 2826854, 2599985, 1689266],
+    ['HSET', 2628055, 2447099, 1514368], ['ZADD', 2398487, 1835926, 548041],
+    ['ZRANGE', 1786067, 1485170, 1094335] ] },
+  { id: 'p1', label: '32 clients · no pipelining', rows: [
+    ['GET 256 B', 597096, 338504, 358598], ['SET 256 B', 578372, 339073, 339196],
+    ['GET 4 KiB', 546983, 301687, 282093], ['SET 4 KiB', 525455, 305616, 282125],
+    ['INCR', 595150, 338542, 359802], ['HGET', 583295, 338542, 338542],
+    ['HSET', 559829, 338542, 338354], ['ZADD', 432670, 320660, 237959],
+    ['ZRANGE', 554188, 321313, 321805] ] },
+  { id: 'c1', label: '1 client', rows: [
+    ['GET 256 B', 21547, 13227, 22415], ['SET 256 B', 21388, 13114, 21929],
+    ['GET 4 KiB', 20669, 12443, 21002], ['SET 4 KiB', 20419, 12512, 20954],
+    ['INCR', 21468, 13342, 22365], ['HGET', 22019, 13193, 22379],
+    ['HSET', 21747, 13014, 22039], ['ZADD', 21283, 12870, 21380],
+    ['ZRANGE', 21025, 12862, 21856] ] },
+];
+const fmt = (n: number) => n >= 1e6 ? `${(n / 1e6).toFixed(2)}M` : n >= 1e4 ? `${Math.round(n / 1e3)}k` : String(n);
+
+const docker = 'docker run -d --name ffkv -p 6379:6379 -v ffkv-data:/var/lib/ffkv ghcr.io/akhil-gautam/ffkv';
+const year = 2026;
+---
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>{title}</title>
+  <meta name="description" content={description} />
+  <meta property="og:title" content={title} />
+  <meta property="og:description" content={description} />
+  <link rel="icon" href={docsLink('favicon.svg')} type="image/svg+xml" />
+  <link rel="canonical" href={new URL(import.meta.env.BASE_URL, Astro.site)} />
+</head>
+<body>
+  <a class="skip" href="#main">Skip to content</a>
+
+  <header class="nav-wrap">
+    <nav class="nav" aria-label="Primary">
+      <a class="brand" href={docsLink('')} aria-label="ffkv home">
+        <svg viewBox="0 0 202 88" width="62" height="27" fill="currentColor" aria-hidden="true"><g transform="translate(12 12)"><path d="M0 64V20C0 9 9 0 20 0H36L26 12H20C15.6 12 12 15.6 12 20V28H32L22 40H12V64Z"/><path d="M36 64V20C36 9 45 0 56 0H72L62 12H56C51.6 12 48 15.6 48 20V28H68L58 40H48V64Z"/><path d="M78 0H90V35L106 20H123L101 41L124 64H106L90 47V64H78Z"/><path d="M128 20H141L153 50L165 20H178L160 64H146Z"/></g></svg>
+      </a>
+      <div class="nav-links">
+        <a href={docsLink('getting-started/quickstart/')}>Docs</a>
+        <a href={docsLink('reference/commands/')}>Commands</a>
+        <a href="#benchmarks">Benchmarks</a>
+        <a href={docsLink('deployment/docker/')}>Docker</a>
+      </div>
+      <a class="btn btn-dark nav-cta" href={docsLink('getting-started/quickstart/')}>Get started</a>
+    </nav>
+  </header>
+
+  <main id="main">
+    <!-- Hero -->
+    <section class="hero" aria-labelledby="hero-title">
+      <svg class="lanes" viewBox="0 0 1440 640" preserveAspectRatio="none" aria-hidden="true">
+        <path class="lane l1" pathLength="1" d="M-120 330 C 240 40, 900 -30, 1560 120" />
+        <path class="lane l2" pathLength="1" d="M-120 380 C 260 90, 900 20, 1560 170" />
+        <path class="lane l3" pathLength="1" d="M-120 430 C 280 140, 900 70, 1560 220" />
+        <path class="lane l4" pathLength="1" d="M-120 480 C 300 190, 900 120, 1560 270" />
+        <path class="streak s1" d="M-120 330 C 240 40, 900 -30, 1560 120" />
+        <path class="streak s2" d="M-120 380 C 260 90, 900 20, 1560 170" />
+        <path class="streak s3" d="M-120 430 C 280 140, 900 70, 1560 220" />
+        <path class="streak s4" d="M-120 480 C 300 190, 900 120, 1560 270" />
+      </svg>
+      <div class="hero-inner">
+        <div class="hero-main">
+          <p class="pill rise" style="--d:0"><span class="dot" aria-hidden="true"></span> ffkv 0.1 · open alpha · written in Rust</p>
+          <h1 id="hero-title"><span class="rise" style="--d:1">Freaking fast KV,</span><br /><em class="rise" style="--d:2">on every core.</em></h1>
+          <p class="lead rise" style="--d:3">ffkv is a durable key-value datastore for caches, queues and background jobs. Connections spread across every CPU core, and it speaks RESP, so the clients you already use connect as they are.</p>
+          <div class="hero-actions rise" style="--d:4">
+            <a class="btn btn-dark btn-lg" href={docsLink('getting-started/quickstart/')}>Start building <span aria-hidden="true">→</span></a>
+            <a class="btn btn-soft btn-lg" href="#benchmarks">See benchmarks</a>
+          </div>
+        </div>
+        <div class="cores rise" style="--d:3" aria-hidden="true">
+          <div class="cores-head"><span><i class="live"></i> ffkv · 4 cores</span><span class="mono">0.0.0.0:6379</span></div>
+          {[0, 1, 2, 3].map((core) => <div class="core">
+            <span class="core-label">core {core}</span>
+            <div class="track">
+              {[['GET', 'INCR', 'HSET'], ['LPUSH', 'GET', 'ZADD'], ['SET', 'BRPOP', 'GET'], ['INCR', 'HGET', 'XADD']][core].map((name, i) =>
+                <span class="packet" style={`--i:${i};--c:${core}`}>{name}</span>)}
+            </div>
+          </div>)}
+          <div class="cores-foot"><span>INCR <b>3.08M/s</b></span><span>vs Dragonfly <b>27/27</b></span></div>
+        </div>
+        <div class="copy-line rise" style="--d:5" data-copy={docker}>
+          <span class="prompt" aria-hidden="true">$</span>
+          <code>{docker}</code>
+          <button type="button" class="copy" aria-label="Copy docker command">Copy</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Works with -->
+    <section class="works" aria-label="Compatible clients">
+      <p>Drop-in for the tools you already run</p>
+      <div class="marquee">
+        <ul>
+          <li>RESP2</li><li>RESP3</li><li>redis-cli</li><li>Sidekiq</li><li>Rails cache</li><li>Lua scripts</li><li>TLS + ACL</li><li>MCP agents</li><li>Prometheus</li><li>Docker</li>
+        </ul>
+        <ul aria-hidden="true">
+          <li>RESP2</li><li>RESP3</li><li>redis-cli</li><li>Sidekiq</li><li>Rails cache</li><li>Lua scripts</li><li>TLS + ACL</li><li>MCP agents</li><li>Prometheus</li><li>Docker</li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- Stat band -->
+    <section class="stats reveal" aria-label="At a glance">
+      <div><strong><span class="count" data-to="27">27</span><span class="sep">/</span>27</strong><p>matched benchmark cases<br />faster than Dragonfly</p></div>
+      <div><strong><span class="count" data-to="3.08" data-decimals="2">3.08</span>M</strong><p>INCR per second on<br />four server cores</p></div>
+      <div><strong><span class="count" data-to={commands}>{commands}</span></strong><p>commands, plus 19<br />data-type families</p></div>
+    </section>
+
+    <!-- Lanes race -->
+    <section class="race" aria-labelledby="race-title">
+      <div class="race-card reveal">
+        <div class="race-copy">
+          <p class="race-kicker">GET 256 B · 32 clients · no pipelining</p>
+          <h2 id="race-title">Requests run on <em>every core</em></h2>
+          <dl class="race-nums">
+            <div class="is-ffkv"><dt>ffkv</dt><dd><span class="count" data-to="597">597</span>k<small>/s</small></dd></div>
+            <div><dt>Redis 8.2.1</dt><dd>359k<small>/s</small></dd></div>
+            <div><dt>Dragonfly 2.0.2</dt><dd>339k<small>/s</small></dd></div>
+          </dl>
+          <p class="race-ratio"><b>1.67×</b> Redis <span aria-hidden="true">·</span> <b>1.76×</b> Dragonfly</p>
+        </div>
+        <div class="race-tracks" aria-hidden="true">
+          <div class="group single">
+            <div class="group-head"><span>Single thread</span><span>1 lane · requests wait their turn</span></div>
+            <div class="lane">
+              <div class="queue">{[0, 1, 2, 3, 4, 5].map((n) => <i style={`--n:${n}`}></i>)}</div>
+              <div class="road">{['GET', 'SET', 'INCR', 'GET'].map((name, n) => <span class="car" style={`--n:${n}`}>{name}</span>)}</div>
+            </div>
+          </div>
+          <div class="group multi">
+            <div class="group-head"><span>ffkv</span><span>a lane per core · no waiting</span></div>
+            {[0, 1, 2, 3].map((lane) => <div class="lane">
+              <div class="queue empty"></div>
+              <div class="road">{[['GET', 'HSET'], ['INCR', 'GET'], ['SET', 'LPUSH'], ['GET', 'ZADD']][lane].map((name, n) => <span class="car" style={`--n:${n};--l:${lane}`}>{name}</span>)}</div>
+            </div>)}
+          </div>
+        </div>
+      </div>
+      <p class="race-caption">Commands on one core take turns. ffkv gives each CPU its own runtime and runs shard work where the request lands, so requests travel side by side, and a hot key is batched on its shard's worker instead of bouncing between cores.</p>
+    </section>
+
+    <!-- Benchmarks -->
+    <section class="bench" id="benchmarks" aria-labelledby="bench-title">
+      <div class="section-head">
+        <h2 id="bench-title" class="reveal">ffkv vs Dragonfly <em>vs Redis</em></h2>
+        <p>Same VM, same pinned CPUs, same compiled <code>redis-benchmark</code>. Commands per second, median of two runs, every trial checked for correctness.</p>
+      </div>
+      <div class="tabs" role="tablist" aria-label="Client profile">
+        {profiles.map((p, i) => <button type="button" role="tab" id={`tab-${p.id}`} aria-controls={`panel-${p.id}`} aria-selected={i === 0 ? 'true' : 'false'} tabindex={i === 0 ? 0 : -1}>{p.label}</button>)}
+      </div>
+      <div class="legend" aria-hidden="true"><span class="k ffkv"></span>ffkv <span class="k dfly"></span>Dragonfly 2.0.2 <span class="k redis"></span>Redis 8.2.1</div>
+      {profiles.map((p, i) => {
+        const max = Math.max(...p.rows.flatMap((r) => r.slice(1) as number[]));
+        return <div class="panel" role="tabpanel" id={`panel-${p.id}`} aria-labelledby={`tab-${p.id}`} hidden={i !== 0}>
+          <table>
+            <caption class="sr-only">Commands per second, {p.label}</caption>
+            <thead class="sr-only"><tr><th scope="col">Workload</th><th scope="col">ffkv</th><th scope="col">Dragonfly</th><th scope="col">Redis</th></tr></thead>
+            <tbody>
+              {p.rows.map(([name, f, d, r]) => <tr>
+                <th scope="row">{name}<span class="ratio">{((f as number) / (d as number)).toFixed(2)}× Dragonfly</span></th>
+                <td colspan="3"><div class="bars">
+                  <div class="bar ffkv" style={`--w:${((f as number) / max) * 100}%`}><span>{fmt(f as number)}</span></div>
+                  <div class="bar dfly" style={`--w:${((d as number) / max) * 100}%`}><span>{fmt(d as number)}</span></div>
+                  <div class="bar redis" style={`--w:${((r as number) / max) * 100}%`}><span>{fmt(r as number)}</span></div>
+                </div></td>
+              </tr>)}
+            </tbody>
+          </table>
+        </div>;
+      })}
+      <p class="bench-note">ffkv beat Dragonfly in 27 of 27 cases and Redis in 18 of 27. With a single client and no pipelining, single-threaded Redis stays 0.5–4% ahead. Memory-only, one ARM64 Linux VM, four server CPUs. <a href={docsLink('contributing/benchmarks/')}>Method, every table and raw data →</a></p>
+    </section>
+
+    <!-- Three things -->
+    <section class="three" aria-labelledby="three-title">
+      <h2 id="three-title" class="reveal">Built for <em>background jobs</em></h2>
+      <div class="three-grid">
+        <article class="pcard amber reveal" style="--d:0">
+          <div class="mini">
+            <div class="row"><span class="mono muted">--durability</span><span class="seg"><b>strict</b><i>everysec</i></span></div>
+            <div class="row log"><span class="mono">fsync</span><span>SET order:42 …</span><span class="ok">✓</span></div>
+            <div class="row log"><span class="mono">fsync</span><span>LPUSH jobs …</span><span class="ok">✓</span></div>
+            <div class="chips"><span>WAL</span><span>Checkpoints</span><span>Backups</span></div>
+          </div>
+          <span class="tag">DURABLE</span>
+          <h3>Durable when you ask for it</h3>
+          <p><code>strict</code> fsyncs before every reply; <code>everysec</code> trades up to about a second of writes for speed. Plus online backups and offline restore.</p>
+        </article>
+        <article class="pcard lime reveal" style="--d:1">
+          <div class="mini">
+            <div class="row"><span class="mono">BRPOP jobs 0</span><span class="muted">waiting…</span></div>
+            <div class="row job"><span class="avatar">J</span><span><b>email.welcome</b><small>leased · 30s</small></span><span class="btn-mini">ACK</span></div>
+            <div class="row job"><span class="avatar">J</span><span><b>invoice.render</b><small>retry 1 of 5</small></span><span class="btn-mini ghost">NACK</span></div>
+          </div>
+          <span class="tag">QUEUES</span>
+          <h3>Queues without bolt-ons</h3>
+          <p>Blocking list queues, native leased jobs with acknowledgements and retries, and a Sidekiq integration that is tested.</p>
+        </article>
+        <article class="pcard sky reveal" style="--d:2">
+          <div class="mini">
+            <div class="row"><span class="mono">TLS</span><span class="toggle on"></span></div>
+            <div class="row"><span class="mono">ACL users</span><span class="toggle on"></span></div>
+            <div class="row"><span class="mono">Prometheus</span><span class="toggle on"></span></div>
+            <div class="chips"><span>Console</span><span>Replication</span><span>Cluster</span></div>
+          </div>
+          <span class="tag">OPERABLE</span>
+          <h3>Built to be operated</h3>
+          <p>TLS, named users, metrics, an audited web console, native replication and cluster mode.</p>
+        </article>
+      </div>
+    </section>
+
+    <!-- Dark feature cards -->
+    <section class="dark" aria-labelledby="dark-title">
+      <div class="section-head light">
+        <h2 id="dark-title">The full Redis <em>toolbox</em></h2>
+        <p>{commands} commands across 19 data-type families, from strings and streams to JSON, vector sets and time series.</p>
+      </div>
+      <div class="dgrid">
+        <article class="dcard reveal" style="--d:0">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m3 8 9-5 9 5-9 5-9-5Zm0 5 9 5 9-5"/></svg>
+          <h3>19 data types</h3><p>Probabilistic sketches, JSON, vectors.</p>
+          <div class="chat"><span class="q">JSON.SET user:1 $ '…'</span><span class="a">OK</span><span class="q">BF.ADD seen ada</span><span class="a">(integer) 1</span></div>
+        </article>
+        <article class="dcard reveal" style="--d:1">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 6 3 12l5 6m8-12 5 6-5 6"/></svg>
+          <h3>Lua & transactions</h3><p>EVAL, FUNCTION, MULTI/EXEC, WATCH.</p>
+          <div class="chat"><span class="q">EVAL "return redis.call('INCR',KEYS[1])" 1 hits</span><span class="a">(integer) 7</span></div>
+        </article>
+        <article class="dcard reveal" style="--d:2">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12a8 8 0 0 1 16 0M8 12a4 4 0 0 1 8 0"/><circle cx="12" cy="12" r="1"/></svg>
+          <h3>Pub/Sub</h3><p>Channels, patterns, shard channels.</p>
+          <div class="chat"><span class="q">PUBLISH orders paid:42</span><span class="a">(integer) 3</span></div>
+        </article>
+        <article class="dcard reveal" style="--d:3">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 4v10a4 4 0 0 0 4 4h8M14 14l4 4-4 4"/><circle cx="6" cy="4" r="2"/></svg>
+          <h3>Replication & cluster</h3><p>Native replicas, hash-slot clustering.</p>
+          <div class="chat"><span class="q">REPLICAOF ffkv-1 6379</span><span class="a">OK</span></div>
+        </article>
+        <article class="dcard reveal" style="--d:4">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v4m0 10v4M3 12h4m10 0h4M6 6l2.5 2.5m7 7L18 18M6 18l2.5-2.5m7-7L18 6"/></svg>
+          <h3>MCP for agents</h3><p>A sidecar for Claude, Codex and friends.</p>
+          <div class="chat"><span class="q">ffkv-mcp --port 6379</span><span class="a">7 tools ready</span></div>
+        </article>
+      </div>
+    </section>
+
+    <!-- Get started -->
+    <section class="start" aria-labelledby="start-title">
+      <div class="steps">
+        <h2 id="start-title">Try it with <em>Docker</em></h2>
+        <ol>
+          <li><b>Start it</b><span>The image runs on amd64 and arm64. TLS and an <code>admin</code> password are generated on first start.</span></li>
+          <li><b>Talk to it</b><span>Use <code>ffkv-cli</code> inside the container, or any Redis client with the generated CA.</span></li>
+          <li><b>Keep it</b><span>Data, certificate and password live in the volume, and <code>strict</code> durability is the default.</span></li>
+        </ol>
+        <a class="btn btn-dark btn-lg" href={docsLink('deployment/docker/')}>Read the Docker guide <span aria-hidden="true">→</span></a>
+      </div>
+      <div class="term reveal" role="img" aria-label="Terminal session starting ffkv with Docker">
+        <div class="term-bar"><i></i><i></i><i></i><span>zsh</span></div>
+<pre><span class="tl type" style="--t:0"><span class="c">$</span> docker run -d --name ffkv -p 6379:6379 \</span>
+<span class="tl type" style="--t:1">    -v ffkv-data:/var/lib/ffkv ghcr.io/akhil-gautam/ffkv</span>
+<span class="tl" style="--t:2"><span class="m">ffkv 0.1.0 listening on 0.0.0.0:6379 (WAL Strict)</span></span>
+
+<span class="tl type" style="--t:3"><span class="c">$</span> docker exec ffkv ffkv-cli PING</span>
+<span class="tl" style="--t:4"><span class="g">PONG</span></span>
+
+<span class="tl type" style="--t:5"><span class="c">$</span> docker exec ffkv ffkv-cli SET greeting "hello ffkv"</span>
+<span class="tl" style="--t:6"><span class="g">OK</span></span>
+
+<span class="tl type" style="--t:7"><span class="c">$</span> docker exec ffkv ffkv-cli INCR visits</span>
+<span class="tl" style="--t:8"><span class="g">(integer) 1</span><span class="caret" aria-hidden="true"></span></span></pre>
+      </div>
+    </section>
+
+    <!-- CTA -->
+    <section class="cta" aria-labelledby="cta-title">
+      <h2 id="cta-title" class="reveal">Read the docs <em>before you deploy</em></h2>
+      <p>Every guarantee and limit is written down: durability, compatibility, and what isn't production-certified yet.</p>
+      <div class="hero-actions center">
+        <a class="btn btn-dark btn-lg" href={docsLink('getting-started/quickstart/')}>Read the handbook <span aria-hidden="true">→</span></a>
+        <a class="btn btn-soft btn-lg" href={docsLink('concepts/compatibility/')}>Compatibility contract</a>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <svg class="foot-lanes" viewBox="0 0 1440 360" preserveAspectRatio="none" aria-hidden="true">
+      <path class="lane l1" d="M-60 250 C 380 -10, 1060 -10, 1500 250" />
+      <path class="lane l2" d="M-60 280 C 400 20, 1040 20, 1500 280" />
+      <path class="lane l3" d="M-60 310 C 420 50, 1020 50, 1500 310" />
+      <path class="lane l4" d="M-60 340 C 440 80, 1000 80, 1500 340" />
+      <path class="night" d="M-60 360 C 460 100, 980 100, 1500 360 V 400 H -60 Z" />
+    </svg>
+    <div class="foot-inner">
+      <div class="foot-brand">
+        <svg viewBox="0 0 202 88" width="120" height="52" fill="currentColor" aria-hidden="true"><g transform="translate(12 12)"><path d="M0 64V20C0 9 9 0 20 0H36L26 12H20C15.6 12 12 15.6 12 20V28H32L22 40H12V64Z"/><path d="M36 64V20C36 9 45 0 56 0H72L62 12H56C51.6 12 48 15.6 48 20V28H68L58 40H48V64Z"/><path d="M78 0H90V35L106 20H123L101 41L124 64H106L90 47V64H78Z"/><path d="M128 20H141L153 50L165 20H178L160 64H146Z"/></g></svg>
+        <p>freaking fast KV<br />© {year} ffkv · open alpha</p>
+      </div>
+      <div class="foot-cols">
+        <div><h3>Start</h3><a href={docsLink('getting-started/installation/')}>Installation</a><a href={docsLink('getting-started/quickstart/')}>Quickstart</a><a href={docsLink('getting-started/cli/')}>CLI</a><a href={docsLink('deployment/docker/')}>Docker</a></div>
+        <div><h3>Build</h3><a href={docsLink('data-types/')}>Data types</a><a href={docsLink('guides/list-queues/')}>List queues</a><a href={docsLink('guides/native-jobs/')}>Native jobs</a><a href={docsLink('guides/sidekiq/')}>Sidekiq</a></div>
+        <div><h3>Operate</h3><a href={docsLink('operations/persistence/')}>Persistence</a><a href={docsLink('operations/backup-restore/')}>Backup & restore</a><a href={docsLink('operations/replication/')}>Replication</a><a href={docsLink('operations/security/')}>Security</a></div>
+        <div><h3>Reference</h3><a href={docsLink('reference/commands/')}>Commands</a><a href={docsLink('reference/configuration/')}>Configuration</a><a href={docsLink('concepts/architecture/')}>Architecture</a><a href={docsLink('contributing/benchmarks/')}>Benchmarks</a></div>
+      </div>
+    </div>
+  </footer>
+
+  <script>
+    for (const line of document.querySelectorAll<HTMLElement>('.copy-line')) {
+      const button = line.querySelector('button');
+      button?.addEventListener('click', async () => {
+        await navigator.clipboard.writeText(line.dataset.copy ?? '');
+        button.textContent = 'Copied';
+        setTimeout(() => { button.textContent = 'Copy'; }, 1600);
+      });
+    }
+    const tabs = [...document.querySelectorAll<HTMLButtonElement>('[role="tab"]')];
+    const grow = (panel: HTMLElement | null) => {
+      if (!panel) return;
+      panel.classList.remove('grown');
+      requestAnimationFrame(() => requestAnimationFrame(() => panel.classList.add('grown')));
+    };
+    const select = (tab: HTMLButtonElement) => {
+      for (const other of tabs) {
+        const on = other === tab;
+        other.setAttribute('aria-selected', String(on));
+        other.tabIndex = on ? 0 : -1;
+        const panel = document.getElementById(other.getAttribute('aria-controls')!)!;
+        panel.hidden = !on;
+        if (on) grow(panel);
+      }
+    };
+    tabs.forEach((tab, i) => {
+      tab.addEventListener('click', () => select(tab));
+      tab.addEventListener('keydown', (event) => {
+        const step = event.key === 'ArrowRight' ? 1 : event.key === 'ArrowLeft' ? -1 : 0;
+        if (!step) return;
+        const next = tabs[(i + step + tabs.length) % tabs.length];
+        select(next); next.focus();
+      });
+    });
+    const header = document.querySelector('.nav-wrap');
+    const onScroll = () => header?.classList.toggle('floating', window.scrollY > 24);
+    window.addEventListener('scroll', onScroll, { passive: true }); onScroll();
+
+    // Scroll-triggered motion; everything stays visible without JS or with reduced motion.
+    const still = matchMedia('(prefers-reduced-motion: reduce)').matches;
+    document.documentElement.classList.add(still ? 'still' : 'motion');
+    const countUp = (el: HTMLElement) => {
+      const to = Number(el.dataset.to), decimals = Number(el.dataset.decimals ?? 0), start = performance.now();
+      const frame = (now: number) => {
+        const t = Math.min(1, (now - start) / 1400), eased = 1 - Math.pow(1 - t, 3);
+        el.textContent = (to * eased).toFixed(decimals);
+        if (t < 1) requestAnimationFrame(frame);
+      };
+      requestAnimationFrame(frame);
+    };
+    const seen = new IntersectionObserver((entries) => {
+      for (const entry of entries) {
+        if (!entry.isIntersecting) continue;
+        const el = entry.target as HTMLElement;
+        el.classList.add('in');
+        if (!still) el.querySelectorAll<HTMLElement>('.count').forEach(countUp);
+        if (el.classList.contains('panel')) grow(el);
+        seen.unobserve(el);
+      }
+    }, { threshold: 0.18 });
+    document.querySelectorAll('.reveal, .panel:not([hidden])').forEach((el) => seen.observe(el));
+  </script>
+</body>
+</html>
+
+<style is:global>
+  :root {
+    --cream: #f7f3ea; --cream-2: #efe8da; --ink: #17210f; --ink-2: #3c4934; --muted: #6b7562;
+    --line: #e2dac9; --lime: #b9e38f; --lime-deep: #3f6d22; --amber: #f6c26b; --coral: #f29a7c; --sky: #a9cdf2;
+    --serif: 'Instrument Serif', Georgia, serif; --sans: 'Geist Variable', ui-sans-serif, system-ui, sans-serif;
+    --mono: 'Geist Mono Variable', ui-monospace, SFMono-Regular, monospace;
+    --shadow: 0 1px 2px rgb(23 33 15 / .06), 0 8px 24px -8px rgb(23 33 15 / .12);
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; -webkit-font-smoothing: antialiased; }
+  body { margin: 0; background: var(--cream); color: var(--ink); font-family: var(--sans); font-size: 16px; line-height: 1.55; }
+  a { color: inherit; }
+  code { font-family: var(--mono); font-size: .88em; background: rgb(23 33 15 / .06); padding: .1em .35em; border-radius: .35em; }
+  h1, h2, h3 { margin: 0; text-wrap: balance; }
+  p { text-wrap: pretty; }
+  em { font-style: normal; }
+  .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  .skip { position: absolute; left: -999px; top: 8px; }
+  .skip:focus { left: 8px; background: var(--ink); color: var(--cream); padding: .5rem .8rem; border-radius: .5rem; z-index: 50; }
+  :focus-visible { outline: 2px solid var(--lime-deep); outline-offset: 3px; }
+
+  /* Buttons */
+  .btn { display: inline-flex; align-items: center; gap: .45rem; justify-content: center; min-height: 40px; padding: .5rem 1rem; border-radius: .7rem; font-weight: 550; font-size: .9rem; text-decoration: none; border: 0; cursor: pointer; transition-property: background-color, scale; transition-duration: .15s; }
+  .btn:active { scale: .96; }
+  .btn-lg { min-height: 48px; padding: .75rem 1.3rem; font-size: .95rem; }
+  .btn-dark { background: var(--ink); color: #f4f7ee; }
+  .btn-dark:hover { background: #2a3a20; }
+  .btn-soft { background: var(--cream-2); color: var(--ink); }
+  .btn-soft:hover { background: #e6dcc8; }
+
+  /* Nav */
+  .nav-wrap { position: sticky; top: 0; z-index: 20; padding: 1rem 1.25rem 0; transition-property: padding; transition-duration: .2s; }
+  .nav { max-width: 1120px; margin: 0 auto; display: flex; align-items: center; gap: 1.5rem; padding: .55rem .6rem .55rem 1.1rem; border-radius: 1.1rem; transition-property: background-color, box-shadow, max-width; transition-duration: .25s; }
+  .nav-wrap.floating .nav { max-width: 760px; background: rgb(250 247 240 / .82); backdrop-filter: blur(14px); box-shadow: var(--shadow), 0 0 0 1px rgb(23 33 15 / .05); }
+  .brand { color: var(--ink); display: inline-flex; min-height: 40px; align-items: center; }
+  .nav-links { display: flex; gap: 1.6rem; margin-left: auto; font-size: .88rem; font-weight: 500; }
+  .nav-links a { text-decoration: none; color: var(--ink-2); padding: .4rem 0; }
+  .nav-links a:hover { color: var(--ink); }
+
+  /* Hero */
+  .hero { position: relative; overflow: hidden; padding: 7rem 1.5rem 5rem; margin-top: -4.5rem; }
+  .lanes { position: absolute; left: 0; top: 0; width: 100%; height: 460px; }
+  .lane { fill: none; stroke-width: 34; stroke-linecap: round; }
+  .l1 { stroke: var(--amber); } .l2 { stroke: var(--coral); } .l3 { stroke: var(--lime); } .l4 { stroke: var(--sky); }
+  .streak { fill: none; stroke: #fff; stroke-width: 4; stroke-linecap: round; stroke-dasharray: 60 1400; opacity: .75; animation: race 5.5s cubic-bezier(.6,0,.2,1) infinite; }
+  .s2 { animation-duration: 4.6s; animation-delay: 1.1s; } .s3 { animation-duration: 6.2s; animation-delay: .5s; } .s4 { animation-duration: 5s; animation-delay: 2.3s; }
+  @keyframes race { from { stroke-dashoffset: 1460; } to { stroke-dashoffset: -60; } }
+  .hero-inner { position: relative; max-width: 1120px; margin: 0 auto; padding-top: 15rem; display: grid; grid-template-columns: 1.25fr 1fr; column-gap: 3.5rem; align-items: end; }
+  .hero-main .pill { margin-bottom: 1.4rem; }
+  .hero-main .lead { margin: 1.5rem 0 1.6rem; font-size: 1.05rem; max-width: 33rem; }
+  .hero h1 > span, .hero h1 > em { display: inline-block; }
+  .hero-inner .copy-line { grid-column: 1 / -1; justify-self: center; margin-top: 3.5rem; }
+
+  /* Cores visual */
+  .cores { align-self: center; background: #fffdf8; border-radius: 1.4rem; padding: 1rem 1.1rem; box-shadow: var(--shadow), 0 30px 60px -36px rgb(23 33 15 / .35); }
+  .cores-head, .cores-foot { display: flex; justify-content: space-between; align-items: center; font-size: .78rem; color: var(--muted); }
+  .cores-head { padding-bottom: .7rem; border-bottom: 1px solid #efe9dc; margin-bottom: .4rem; }
+  .cores-head > span:first-child { display: inline-flex; align-items: center; gap: .45rem; font-weight: 600; color: var(--ink); }
+  .live { width: 8px; height: 8px; border-radius: 50%; background: #4caf50; position: relative; }
+  .live::after { content: ''; position: absolute; inset: 0; border-radius: 50%; background: #4caf50; animation: ping 1.8s cubic-bezier(0, 0, .2, 1) infinite; }
+  @keyframes ping { 75%, 100% { transform: scale(2.4); opacity: 0; } }
+  .core { display: grid; grid-template-columns: 3.6rem 1fr; align-items: center; gap: .6rem; padding: .45rem 0; }
+  .core-label { font: 500 .7rem var(--mono); color: var(--muted); }
+  .track { position: relative; height: 30px; border-radius: .6rem; background: repeating-linear-gradient(90deg, #f3eee3 0 10px, #f7f3ea 10px 20px); overflow: hidden; }
+  .packet { position: absolute; top: 4px; left: 0; height: 22px; padding: 0 .55rem; border-radius: .45rem; display: inline-flex; align-items: center; font: 600 .66rem var(--mono); color: #1d2e11; background: var(--lime); box-shadow: 0 1px 2px rgb(23 33 15 / .12); translate: -110% 0; animation: flow 3.6s linear infinite; animation-delay: calc(var(--i) * -1.2s - var(--c) * .45s); }
+  .core:nth-of-type(2) .packet { background: var(--amber); } .core:nth-of-type(3) .packet { background: var(--sky); } .core:nth-of-type(4) .packet { background: var(--coral); }
+  @keyframes flow { from { left: 0%; translate: -110% 0; } to { left: 100%; translate: 10% 0; } }
+  .cores-foot { padding-top: .7rem; margin-top: .3rem; border-top: 1px solid #efe9dc; }
+  .cores-foot b { color: var(--lime-deep); font-variant-numeric: tabular-nums; }
+
+  /* Load and scroll motion (disabled for reduced motion) */
+  @media (prefers-reduced-motion: no-preference) {
+    .rise { animation: rise .9s cubic-bezier(.2, 0, 0, 1) both; animation-delay: calc(var(--d, 0) * 110ms + 120ms); }
+    .hero .lane { stroke-dasharray: 1; stroke-dashoffset: 1; animation: draw 1.6s cubic-bezier(.6, 0, .2, 1) forwards; }
+    .hero .l2 { animation-delay: .12s; } .hero .l3 { animation-delay: .24s; } .hero .l4 { animation-delay: .36s; }
+    html.motion .reveal { transition-property: opacity, translate, filter; transition-duration: .8s; transition-timing-function: cubic-bezier(.2, 0, 0, 1); transition-delay: calc(var(--d, 0) * 100ms); }
+    html.motion .reveal:not(.in) { opacity: 0; translate: 0 28px; filter: blur(6px); }
+    html.motion .panel:not(.grown) .bar { width: 0; min-width: 0; }
+    html.motion .panel:not(.grown) .bar span { opacity: 0; }
+    .bar span { transition: opacity .3s .6s; }
+    .bar.dfly { transition-delay: .08s; } .bar.redis { transition-delay: .16s; }
+    html.motion .term .tl { visibility: hidden; }
+    html.motion .term.in .tl { animation: show 0s forwards; animation-delay: calc(var(--t) * .55s + .4s); }
+    html.motion .term.in .tl.type { animation: show 0s forwards, type .45s steps(40, end) forwards; animation-delay: calc(var(--t) * .55s + .4s); }
+  }
+  @keyframes rise { from { opacity: 0; translate: 0 18px; filter: blur(8px); } to { opacity: 1; translate: 0 0; filter: blur(0); } }
+  @keyframes draw { to { stroke-dashoffset: 0; } }
+  @keyframes show { to { visibility: visible; } }
+  @keyframes type { from { clip-path: inset(0 100% 0 0); } to { clip-path: inset(0 0 0 0); } }
+  .term .tl { display: inline-block; }
+  .caret { display: inline-block; width: .55em; height: 1.05em; margin-left: .3em; vertical-align: -.15em; background: var(--lime); animation: blink 1.1s steps(1) infinite; }
+  @keyframes blink { 50% { opacity: 0; } }
+  .pill { display: inline-flex; align-items: center; gap: .5rem; margin: 0 0 1.4rem; padding: .35rem .8rem; border-radius: 99px; background: rgb(255 255 255 / .75); box-shadow: var(--shadow); font-size: .8rem; font-weight: 500; color: var(--ink-2); }
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--lime-deep); box-shadow: 0 0 0 3px rgb(63 109 34 / .18); }
+  .hero h1 { font-family: var(--serif); font-weight: 400; font-size: clamp(3rem, 6.2vw, 5.4rem); line-height: .98; letter-spacing: -.02em; }
+  .hero h1 em, h2 em { color: var(--lime-deep); }
+  .lead { max-width: 36rem; margin: 1.6rem 0 2rem; font-size: 1.1rem; color: var(--ink-2); }
+  .hero-actions { display: flex; flex-wrap: wrap; gap: .75rem; }
+  .hero-actions.center { justify-content: center; }
+  .copy-line { margin-top: 1.5rem; display: inline-flex; align-items: center; gap: .7rem; padding: .4rem .45rem .4rem .9rem; border-radius: .8rem; background: var(--ink); color: #dfe8d4; font-family: var(--mono); font-size: .82rem; max-width: 100%; }
+  .copy-line code { background: none; padding: 0; color: inherit; overflow-x: auto; white-space: nowrap; }
+  .prompt { color: var(--lime); }
+  .copy { font: 500 .75rem var(--sans); background: rgb(255 255 255 / .1); color: #f4f7ee; border: 0; border-radius: .5rem; min-height: 32px; padding: 0 .7rem; cursor: pointer; transition-property: background-color; transition-duration: .15s; }
+  .copy:hover { background: rgb(255 255 255 / .2); }
+
+  /* Works with */
+  .works { max-width: 1120px; margin: 0 auto; padding: 1rem 1.5rem 3rem; text-align: center; }
+  .works p { font-size: .82rem; color: var(--muted); margin: 0 0 1rem; }
+  .marquee { display: flex; overflow: hidden; mask-image: linear-gradient(90deg, transparent, #000 12%, #000 88%, transparent); }
+  .marquee ul { list-style: none; margin: 0; padding: 0 1.1rem; display: flex; flex: none; gap: 2.2rem; font-weight: 600; font-size: 1.05rem; color: #8a917f; letter-spacing: -.01em; white-space: nowrap; animation: marquee 28s linear infinite; }
+  .marquee:hover ul { animation-play-state: paused; }
+  @keyframes marquee { to { translate: -100% 0; } }
+
+  /* Stats */
+  .stats { max-width: 1120px; margin: 0 auto 6rem; display: grid; grid-template-columns: repeat(3, 1fr); padding: 2.6rem 1rem; border-radius: 1.4rem; background: radial-gradient(120% 140% at 100% 0%, #4c6a2f 0%, #1d2a14 45%, #11180c 100%); color: #eef3e6; box-shadow: var(--shadow); }
+  .stats > div { text-align: center; padding: 0 1rem; }
+  .stats > div + div { border-left: 1px solid rgb(255 255 255 / .1); }
+  .stats strong { display: block; font-family: var(--serif); font-weight: 400; font-size: clamp(2.6rem, 5vw, 3.6rem); line-height: 1; color: var(--lime); font-variant-numeric: tabular-nums; }
+  .stats strong .sep { color: rgb(185 227 143 / .5); }
+  .stats p { margin: .7rem 0 0; font-size: .85rem; color: #b9c4ad; }
+
+  /* Lanes race */
+  .race { max-width: 1180px; margin: 0 auto 7rem; padding: 0 1.25rem; }
+  .race-card { display: grid; grid-template-columns: .85fr 1.15fr; gap: 3rem; align-items: center; padding: 3rem; border-radius: 1.6rem; background: radial-gradient(90% 120% at 0% 0%, rgb(185 227 143 / .16), transparent 55%), #11180c; color: #eef3e6; box-shadow: var(--shadow); overflow: hidden; }
+  .race-kicker { margin: 0 0 1rem; font: 500 .72rem var(--mono); letter-spacing: .04em; color: #8e9a83; }
+  .race h2 { font-family: var(--serif); font-weight: 400; font-size: clamp(2.6rem, 5vw, 4.2rem); line-height: 1; letter-spacing: -.02em; color: #f4f7ee; }
+  .race h2 em { color: var(--lime); }
+  .race-nums { margin: 2rem 0 0; display: grid; gap: .1rem; }
+  .race-nums div { display: flex; align-items: baseline; justify-content: space-between; padding: .6rem 0; border-bottom: 1px solid rgb(255 255 255 / .08); }
+  .race-nums dt { font-size: .9rem; color: #a9b59c; }
+  .race-nums dd { margin: 0; font-family: var(--serif); font-size: 1.9rem; line-height: 1; color: #c9d2bd; font-variant-numeric: tabular-nums; }
+  .race-nums small { font-family: var(--sans); font-size: .8rem; color: #7f8c74; margin-left: .15rem; }
+  .race-nums .is-ffkv dt { color: #f4f7ee; font-weight: 600; }
+  .race-nums .is-ffkv dd { color: var(--lime); font-size: 2.6rem; }
+  .race-ratio { margin: 1.1rem 0 0; font-size: .9rem; color: #a9b59c; }
+  .race-ratio b { color: var(--lime); font-weight: 650; }
+  .race-tracks { display: grid; gap: 1.6rem; }
+  .group { padding: 1rem 1.1rem 1.1rem; border-radius: 1.1rem; background: rgb(255 255 255 / .035); box-shadow: inset 0 0 0 1px rgb(255 255 255 / .06); }
+  .group-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: .7rem; font-size: .78rem; color: #8e9a83; }
+  .group-head span:first-child { font-weight: 600; font-size: .85rem; color: #dfe7d3; }
+  .multi .group-head span:first-child { color: var(--lime); }
+  .lane { display: grid; grid-template-columns: 4.2rem 1fr; gap: .6rem; align-items: center; }
+  .lane + .lane { margin-top: .45rem; }
+  .queue { display: flex; flex-wrap: wrap-reverse; justify-content: flex-end; gap: 3px; }
+  .queue i { width: 10px; height: 10px; border-radius: 3px; background: #c9b99a; animation: wait 1.2s ease-in-out infinite alternate; animation-delay: calc(var(--n) * -.2s); }
+  @keyframes wait { to { translate: 2px 0; opacity: .6; } }
+  .road { position: relative; height: 28px; border-radius: .6rem; overflow: hidden; background: linear-gradient(90deg, transparent 0 calc(100% - 3px), rgb(255 255 255 / .35) calc(100% - 3px)), repeating-linear-gradient(90deg, rgb(255 255 255 / .08) 0 14px, transparent 14px 28px) center / 100% 1px no-repeat, rgb(255 255 255 / .05); }
+  .car { position: absolute; top: 4px; left: 0; height: 20px; padding: 0 .5rem; display: inline-flex; align-items: center; border-radius: .4rem; font: 600 .62rem var(--mono); letter-spacing: .02em; color: #2b2416; background: #c9b99a; animation: drive 3.2s linear infinite; animation-delay: calc(var(--n) * -.8s); }
+  .multi .car { color: #1d2e11; background: var(--lime); animation-duration: 1.9s; animation-delay: calc(var(--n) * -.95s - var(--l) * .47s); }
+  @keyframes drive { from { left: 0; translate: -100% 0; } to { left: 100%; translate: 0 0; } }
+  .race-caption { max-width: 46rem; margin: 1.6rem auto 0; text-align: center; color: var(--ink-2); }
+
+  /* Section heads */
+  .section-head { max-width: 1120px; margin: 0 auto 2rem; display: flex; justify-content: space-between; align-items: end; gap: 2rem; }
+  .section-head h2, .three h2, .steps h2, .cta h2 { font-family: var(--serif); font-weight: 400; font-size: clamp(2.4rem, 5vw, 4rem); line-height: 1; letter-spacing: -.02em; }
+  .section-head p { max-width: 26rem; margin: 0; color: var(--ink-2); font-size: .95rem; }
+
+  /* Benchmarks */
+  .bench { max-width: 1120px; margin: 0 auto 7rem; padding: 0 1.5rem; }
+  .tabs { display: inline-flex; gap: .25rem; padding: .3rem; border-radius: .9rem; background: var(--cream-2); margin-bottom: 1rem; }
+  .tabs button { font: 500 .85rem var(--sans); border: 0; background: transparent; color: var(--ink-2); padding: 0 .9rem; min-height: 40px; border-radius: .65rem; cursor: pointer; transition-property: background-color, color; transition-duration: .15s; }
+  .tabs button[aria-selected='true'] { background: #fff; color: var(--ink); box-shadow: var(--shadow); }
+  .legend { display: flex; align-items: center; gap: .45rem; font-size: .8rem; color: var(--muted); margin: .3rem 0 1rem; }
+  .legend .k { width: 10px; height: 10px; border-radius: 3px; margin-left: .8rem; }
+  .legend .k:first-child { margin-left: 0; }
+  .k.ffkv, .bar.ffkv { background: var(--lime-deep); } .k.dfly, .bar.dfly { background: #c9b99a; } .k.redis, .bar.redis { background: #e2d8c6; }
+  .panel { background: #fffdf8; border-radius: 1.2rem; box-shadow: var(--shadow); padding: .6rem 1.4rem; }
+  .panel table { width: 100%; border-collapse: collapse; }
+  .panel tr + tr { border-top: 1px solid var(--line); }
+  .panel th { text-align: left; font-weight: 600; font-size: .95rem; width: 11rem; padding: 1rem 1rem 1rem 0; vertical-align: middle; }
+  .ratio { display: block; font-weight: 500; font-size: .75rem; color: var(--lime-deep); font-variant-numeric: tabular-nums; }
+  .panel td { padding: .9rem 0; }
+  .bars { display: grid; gap: 4px; }
+  .bar { width: var(--w); min-width: 3.6rem; height: 18px; border-radius: 5px; display: flex; align-items: center; justify-content: flex-end; padding-right: .45rem; transition-property: width, min-width; transition-duration: .9s; transition-timing-function: cubic-bezier(.2, 0, 0, 1); }
+  .bar span { font: 500 .7rem var(--mono); font-variant-numeric: tabular-nums; color: var(--ink); }
+  .bar.ffkv span { color: #f4f7ee; }
+  .bench-note { font-size: .85rem; color: var(--muted); margin-top: 1.2rem; max-width: 52rem; }
+  .bench-note a { color: var(--lime-deep); font-weight: 550; }
+
+  /* Three cards */
+  .three { max-width: 1120px; margin: 0 auto 7rem; padding: 0 1.5rem; text-align: center; }
+  .three h2 { margin-bottom: 2.6rem; }
+  .three-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1.4rem; text-align: left; }
+  .pcard { border-radius: 1.5rem; padding: .7rem .7rem 1.6rem; box-shadow: var(--shadow); }
+  .pcard.amber { background: #fbe3bb; } .pcard.lime { background: #dcefc8; } .pcard.sky { background: #d9e8f8; }
+  .mini { background: #fffdf8; border-radius: 1rem; padding: .9rem 1rem; min-height: 11.5rem; display: grid; align-content: start; gap: .2rem; box-shadow: 0 1px 2px rgb(23 33 15 / .06); }
+  .mini .row { display: flex; align-items: center; justify-content: space-between; gap: .6rem; padding: .45rem 0; font-size: .82rem; }
+  .mini .row + .row { border-top: 1px solid #efe9dc; }
+  .mono { font-family: var(--mono); font-size: .78rem; }
+  .muted { color: var(--muted); }
+  .seg { display: inline-flex; background: var(--cream-2); border-radius: .5rem; padding: 2px; font-size: .72rem; }
+  .seg b, .seg i { font-style: normal; padding: .15rem .5rem; border-radius: .4rem; }
+  .seg b { background: #fff; box-shadow: 0 1px 2px rgb(0 0 0 / .08); }
+  .log span:nth-child(2) { flex: 1; color: var(--ink-2); }
+  .ok { color: var(--lime-deep); font-weight: 700; }
+  .chips { display: flex; flex-wrap: wrap; gap: .35rem; padding-top: .6rem; }
+  .chips span { font: 600 .66rem var(--sans); letter-spacing: .04em; text-transform: uppercase; padding: .2rem .5rem; border-radius: .35rem; background: var(--amber); color: #5a3a07; }
+  .lime .chips span { background: var(--lime); color: #243c13; } .sky .chips span { background: var(--sky); color: #173a5e; }
+  .job span:nth-child(2) { flex: 1; display: grid; }
+  .job small { color: var(--muted); font-size: .72rem; }
+  .avatar { width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; background: var(--lime); font-weight: 700; font-size: .75rem; }
+  .btn-mini { font: 600 .7rem var(--sans); padding: .3rem .7rem; border-radius: .45rem; background: var(--lime-deep); color: #fff; }
+  .btn-mini.ghost { background: transparent; color: var(--ink-2); box-shadow: inset 0 0 0 1px var(--line); }
+  .toggle { width: 34px; height: 20px; border-radius: 99px; background: #cfd8c4; position: relative; }
+  .toggle.on { background: #4f8bc9; }
+  .toggle::after { content: ''; position: absolute; top: 3px; left: 3px; width: 14px; height: 14px; border-radius: 50%; background: #fff; }
+  .toggle.on::after { left: 17px; }
+  .tag { display: inline-block; margin: 1.1rem .5rem .5rem; font: 600 .66rem var(--sans); letter-spacing: .06em; padding: .2rem .5rem; border-radius: .35rem; background: rgb(255 255 255 / .6); color: var(--ink-2); }
+  .pcard h3 { margin: 0 .5rem; font-size: 1.25rem; font-weight: 600; letter-spacing: -.02em; }
+  .pcard p { margin: .5rem .5rem 0; font-size: .9rem; color: var(--ink-2); }
+
+  /* Dark cards */
+  .dark { background: #11180c; color: #eef3e6; padding: 6rem 1.5rem; border-radius: 2rem; margin: 0 1rem 7rem; }
+  .section-head.light p { color: #b9c4ad; }
+  .section-head.light em { color: var(--lime); }
+  .dgrid { max-width: 1120px; margin: 0 auto; display: grid; grid-template-columns: repeat(5, 1fr); gap: .9rem; }
+  .dcard { position: relative; border-radius: 1.1rem; padding: 1.2rem 1rem 1rem; background: radial-gradient(120% 90% at 100% 0%, rgb(185 227 143 / .22), transparent 60%), linear-gradient(180deg, #1c2615, #141c0f); box-shadow: inset 0 0 0 1px rgb(255 255 255 / .06); display: flex; flex-direction: column; min-height: 20rem; }
+  .dcard svg { width: 20px; height: 20px; fill: none; stroke: var(--lime); stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+  .dcard h3 { margin-top: 1rem; font-size: 1rem; font-weight: 600; }
+  .dcard p { font-size: .82rem; color: #a9b59c; margin: .4rem 0 1rem; }
+  .chat { margin-top: auto; display: grid; gap: .35rem; padding: .6rem; border-radius: .7rem; background: rgb(0 0 0 / .28); box-shadow: inset 0 0 0 1px rgb(255 255 255 / .06); }
+  .chat span { font: .7rem/1.4 var(--mono); padding: .35rem .5rem; border-radius: .5rem; overflow-wrap: anywhere; }
+  .chat .q { background: rgb(255 255 255 / .07); color: #dfe7d3; }
+  .chat .a { justify-self: end; background: var(--lime); color: #1d2e11; font-weight: 600; }
+
+  /* Start */
+  .start { max-width: 1120px; margin: 0 auto 7rem; padding: 0 1.5rem; display: grid; grid-template-columns: 1fr 1.1fr; gap: 3.5rem; align-items: center; }
+  .steps ol { list-style: none; counter-reset: s; margin: 2rem 0 2.2rem; padding: 0; display: grid; gap: 1.3rem; }
+  .steps li { counter-increment: s; display: grid; grid-template-columns: 2.2rem 1fr; column-gap: .9rem; }
+  .steps li::before { content: counter(s, decimal-leading-zero); grid-row: span 2; font: 500 .8rem var(--mono); color: var(--lime-deep); width: 2.2rem; height: 2.2rem; border-radius: 50%; display: grid; place-items: center; background: #e5f0d7; }
+  .steps b { font-size: 1rem; }
+  .steps span { color: var(--ink-2); font-size: .92rem; }
+  .term { background: #11180c; border-radius: 1.2rem; box-shadow: var(--shadow), 0 30px 60px -30px rgb(23 33 15 / .45); overflow: hidden; }
+  .term-bar { display: flex; align-items: center; gap: .4rem; padding: .8rem 1rem; border-bottom: 1px solid rgb(255 255 255 / .06); }
+  .term-bar i { width: 10px; height: 10px; border-radius: 50%; background: #3a4632; }
+  .term-bar span { margin-left: auto; font: .72rem var(--mono); color: #7f8c74; }
+  .term pre { margin: 0; padding: 1.2rem 1.3rem 1.5rem; font: .8rem/1.75 var(--mono); color: #dfe8d4; overflow-x: auto; }
+  .term .c { color: var(--lime); } .term .g { color: var(--amber); } .term .m { color: #7f8c74; }
+
+  /* CTA */
+  .cta { text-align: center; padding: 0 1.5rem 8rem; }
+  .cta p { max-width: 34rem; margin: 1.2rem auto 2rem; color: var(--ink-2); }
+
+  /* Footer */
+  .footer { position: relative; background: #0c1108; color: #dfe8d4; overflow: hidden; }
+  .foot-lanes { display: block; width: 100%; height: 200px; background: var(--cream); }
+  .foot-lanes .night { fill: #0c1108; }
+  .foot-lanes .lane { stroke-width: 26; }
+  .foot-inner { max-width: 1120px; margin: 0 auto; padding: 3.5rem 1.5rem 4rem; display: flex; justify-content: space-between; gap: 3rem; flex-wrap: wrap; }
+  .foot-brand { color: #f4f7ee; }
+  .foot-brand p { color: #8e9a83; font-size: .82rem; margin-top: 1rem; }
+  .foot-cols { display: grid; grid-template-columns: repeat(4, auto); gap: 1rem 3.5rem; }
+  .foot-cols h3 { font-size: .85rem; font-weight: 600; color: #f4f7ee; margin-bottom: .8rem; }
+  .foot-cols a { display: block; font-size: .85rem; color: #a9b59c; text-decoration: none; padding: .25rem 0; }
+  .foot-cols a:hover { color: #f4f7ee; }
+
+  @media (max-width: 900px) {
+    .nav-links { display: none; }
+    .nav-cta { margin-left: auto; }
+    .hero-inner { padding-top: 14rem; grid-template-columns: 1fr; row-gap: 1.6rem; }
+    .lanes { height: 340px; }
+    .stats { grid-template-columns: 1fr; gap: 1.8rem; margin-inline: 1.25rem; }
+    .stats > div + div { border-left: 0; border-top: 1px solid rgb(255 255 255 / .1); padding-top: 1.8rem; }
+    .race-card { grid-template-columns: 1fr; padding: 2rem 1.4rem; gap: 2rem; }
+    .section-head { flex-direction: column; align-items: start; }
+    .three-grid, .start { grid-template-columns: 1fr; }
+    .dgrid { grid-template-columns: repeat(2, 1fr); }
+    .panel th { width: 7.5rem; }
+    .foot-cols { grid-template-columns: repeat(2, auto); }
+  }
+  @media (max-width: 520px) { .dgrid { grid-template-columns: 1fr; } .tabs { display: flex; flex-wrap: wrap; } }
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    .streak, .caret { display: none; }
+    .packet, .live::after, .marquee ul, .car, .queue i { animation: none; }
+    .car { left: calc(var(--n) * 28%); }
+    .packet { position: static; translate: none; margin: 4px 0 0 4px; }
+    .track { display: flex; gap: 4px; }
+    .marquee { flex-wrap: wrap; justify-content: center; mask-image: none; }
+    .marquee ul[aria-hidden] { display: none; }
+  }
+</style>

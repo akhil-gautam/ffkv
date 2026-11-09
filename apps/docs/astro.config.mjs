@@ -35,20 +35,22 @@ export default defineConfig({
       favicon: '/favicon.svg',
       defaultLocale: 'root',
       locales: { root: { label: 'English', lang: 'en' } },
-      customCss: ['./src/styles/docs.css'],
+      customCss: [
+        '@fontsource-variable/geist',
+        '@fontsource-variable/geist-mono',
+        '@fontsource/instrument-serif/400.css',
+        '@fontsource/instrument-serif/400-italic.css',
+        './src/styles/docs.css',
+      ],
       components: {
         SiteTitle: './src/components/SiteTitle.astro',
         Footer: './src/components/Footer.astro',
-        PageTitle: './src/components/PageTitle.astro',
         Search: './src/components/Search.astro',
-      },
-      expressiveCode: {
-        themes: ['github-dark', 'github-light'],
-        styleOverrides: { borderRadius: '0.625rem', codeFontSize: '0.8125rem' },
+        ThemeSelect: './src/components/ThemeSelect.astro',
       },
       sidebar: [
         { label: 'Start here', items: [
-          { label: 'Introduction', slug: '' },
+          { label: 'Introduction', link: '/' },
           { label: 'Installation', slug: 'getting-started/installation' },
           { label: 'Quickstart', slug: 'getting-started/quickstart' },
           { label: 'Native CLI', slug: 'getting-started/cli' },

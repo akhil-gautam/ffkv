@@ -1,0 +1,79 @@
+---
+import { Icon } from '@astrojs/starlight/components';
+
+// A segmented control instead of Starlight's native <select>: native select popups
+// are positioned by the OS (macOS opens them over the selected option, often upward).
+const options = [
+  { value: 'light', icon: 'sun', label: Astro.locals.t('themeSelect.light') },
+  { value: 'dark', icon: 'moon', label: Astro.locals.t('themeSelect.dark') },
+  { value: 'auto', icon: 'laptop', label: Astro.locals.t('themeSelect.auto') },
+] as const;
+---
+<ffkv-theme-switch role="radiogroup" aria-label={Astro.locals.t('themeSelect.accessibleLabel')}>
+  {options.map((option) => (
+    <button type="button" role="radio" data-theme-value={option.value} aria-checked={option.value === 'auto' ? 'true' : 'false'} aria-label={option.label} title={option.label}>
+      <Icon name={option.icon} size="1rem" />
+    </button>
+  ))}
+</ffkv-theme-switch>
+
+{/* Inlined so the stored choice is marked before first paint. */}
+<script is:inline>
+  (() => {
+    const stored = localStorage.getItem('starlight-theme');
+    const theme = stored === 'light' || stored === 'dark' ? stored : 'auto';
+    document.querySelectorAll('ffkv-theme-switch [data-theme-value]').forEach((button) => {
+      button.setAttribute('aria-checked', String(button.dataset.themeValue === theme));
+    });
+  })();
+</script>
+
+<script>
+  type Theme = 'auto' | 'dark' | 'light';
+  const storageKey = 'starlight-theme';
+  const parse = (value: unknown): Theme => (value === 'dark' || value === 'light' ? value : 'auto');
+  const load = (): Theme => parse(localStorage.getItem(storageKey));
+  const system = (): 'light' | 'dark' => (matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
+
+  function apply(theme: Theme): void {
+    document.documentElement.dataset.theme = theme === 'auto' ? system() : theme;
+    localStorage.setItem(storageKey, theme === 'auto' ? '' : theme);
+    document.querySelectorAll<HTMLButtonElement>('ffkv-theme-switch [data-theme-value]').forEach((button) => {
+      const on = button.dataset.themeValue === theme;
+      button.setAttribute('aria-checked', String(on));
+      button.tabIndex = on ? 0 : -1;
+    });
+  }
+
+  matchMedia('(prefers-color-scheme: light)').addEventListener('change', () => {
+    if (load() === 'auto') apply('auto');
+  });
+
+  class ThemeSwitch extends HTMLElement {
+    connectedCallback() {
+      const buttons = [...this.querySelectorAll<HTMLButtonElement>('[data-theme-value]')];
+      apply(load());
+      buttons.forEach((button, index) => {
+        button.addEventListener('click', () => apply(parse(button.dataset.themeValue)));
+        button.addEventListener('keydown', (event) => {
+          const step = event.key === 'ArrowRight' || event.key === 'ArrowDown' ? 1 : event.key === 'ArrowLeft' || event.key === 'ArrowUp' ? -1 : 0;
+          if (!step) return;
+          event.preventDefault();
+          const next = buttons[(index + step + buttons.length) % buttons.length];
+          apply(parse(next.dataset.themeValue));
+          next.focus();
+        });
+      });
+    }
+  }
+  if (!customElements.get('ffkv-theme-switch')) customElements.define('ffkv-theme-switch', ThemeSwitch);
+</script>
+
+<style>
+  ffkv-theme-switch { display: inline-flex; gap: 2px; padding: 3px; border-radius: .7rem; background: var(--docs-surface-raised); box-shadow: inset 0 0 0 1px var(--docs-line); }
+  button { display: grid; place-items: center; width: 2rem; height: 2rem; border: 0; border-radius: .5rem; background: transparent; color: var(--docs-faint); cursor: pointer; transition-property: background-color, color, box-shadow; transition-duration: 140ms; }
+  button:hover { color: var(--docs-ink); }
+  button[aria-checked='true'] { background: var(--docs-surface); color: var(--docs-ink); box-shadow: var(--docs-shadow); }
+  button:active { scale: .96; }
+  button:focus-visible { outline: 2px solid var(--docs-lime); outline-offset: 2px; }
+</style>
