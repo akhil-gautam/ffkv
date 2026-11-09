@@ -97,7 +97,7 @@ for (const command of catalog.commands) {
   else if (pages.get(destination).headings[0] !== command.name) errors.push(`${destination}: command heading does not identify ${command.name}`);
 }
 for (const route of [
-  'getting-started/installation', 'getting-started/quickstart', 'getting-started/cli', 'getting-started/console',
+  'getting-started/installation', 'getting-started/quickstart', 'playground', 'getting-started/cli', 'getting-started/console',
   'concepts/architecture', 'concepts/compatibility', 'data-types', 'guides/native-jobs', 'guides/list-queues',
   'guides/sidekiq', 'guides/transactions', 'guides/lua-functions', 'guides/pubsub', 'guides/modules', 'guides/search',
   'operations/persistence', 'operations/hybrid-storage', 'operations/backup-restore', 'operations/security',
@@ -109,6 +109,7 @@ for (const route of [
   if (!pages.has(`${route}/index.html`)) errors.push(`Missing documentation route: ${route}`);
 }
 if (!files.has('pagefind/pagefind.js')) errors.push('Missing production search index');
+if (!files.has('playground/ffkv.wasm')) errors.push('Missing playground engine (playground/ffkv.wasm)');
 if (errors.length) {
   console.error(errors.join('\n'));
   process.exitCode = 1;

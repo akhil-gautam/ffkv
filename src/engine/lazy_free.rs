@@ -1,13 +1,11 @@
 //! Logical deletion stays on the actor; owned payload destruction runs off it.
 use super::{DatabaseState, Entry};
-use std::sync::{
-    OnceLock,
-    mpsc::{self, Sender},
-};
+use std::sync::{OnceLock, mpsc::Sender};
 
+#[cfg(not(target_os = "wasi"))]
 fn enqueue<T: Send + 'static>(queue: &'static OnceLock<Sender<T>>, name: &'static str, value: T) {
     let sender = queue.get_or_init(|| {
-        let (sender, receiver) = mpsc::channel::<T>();
+        let (sender, receiver) = std::sync::mpsc::channel::<T>();
         std::thread::Builder::new()
             .name(name.to_owned())
             .spawn(move || {
@@ -21,6 +19,12 @@ fn enqueue<T: Send + 'static>(queue: &'static OnceLock<Sender<T>>, name: &'stati
     sender
         .send(value)
         .unwrap_or_else(|_| panic!("lazy release worker stopped"));
+}
+
+/// WASI has no threads, so the value is released inline.
+#[cfg(target_os = "wasi")]
+fn enqueue<T: Send + 'static>(_: &'static OnceLock<Sender<T>>, _: &'static str, value: T) {
+    drop(value);
 }
 
 pub(super) fn entry(value: Entry) {

@@ -224,7 +224,7 @@ mod tests {
         let mut follower = Engine::new();
         follower.set_replica_mode(!migration);
         if migration {
-            let slot = crate::cluster::key_slot(&key);
+            let slot = crate::slot::key_slot(&key);
             follower.set_migration_expiry_ranges(Some(&[(slot, slot)]));
         }
         follower.set_replication_replay(true);

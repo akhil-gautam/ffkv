@@ -805,7 +805,9 @@ pub struct CallArg {
     data: *const c_char,
     len: usize,
 }
-#[unsafe(no_mangle)]
+// Called by the native `call.c` shim; WASI never loads modules, so the
+// playground neither links that shim nor exports these symbols.
+#[cfg_attr(not(target_os = "wasi"), unsafe(no_mangle))]
 pub unsafe extern "C" fn ffkv_module_callv(
     ctx: *mut Context,
     name: *const c_char,
@@ -1065,7 +1067,7 @@ unsafe extern "C" fn reallocate(old: *mut c_void, size: usize) -> *mut c_void {
 }
 
 // This table is the compatibility contract: no generic success stubs are used.
-#[unsafe(export_name = "ffkv_module_get_api")]
+#[cfg_attr(not(target_os = "wasi"), unsafe(export_name = "ffkv_module_get_api"))]
 pub unsafe extern "C" fn get_api(name: *const c_char, target: *mut c_void) -> c_int {
     if name.is_null() || target.is_null() {
         return 1;

@@ -29,6 +29,7 @@ mod server_commands;
 mod server_runtime;
 mod session;
 mod sharding;
+mod slot;
 mod state;
 mod storage;
 mod transport;

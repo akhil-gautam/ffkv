@@ -13,7 +13,7 @@ use rustyline::{DefaultEditor, ExternalPrinter, error::ReadlineError};
 use tokio::sync::mpsc;
 
 use crate::client::{Client, Frame, validate_command};
-use format::{Format, render};
+use format::{Format, redacted_error, render};
 use options::Options;
 
 const REQUEST_LIMIT: usize = 8 * 1024 * 1024;
@@ -511,30 +511,6 @@ pub async fn run() -> i32 {
             }
         }
     }
-}
-
-fn redacted_error(frame: &Frame) -> Frame {
-    // Only preserve protocol-defined codes, never an arbitrary first token
-    // supplied by a peer (that token may itself contain the credential).
-    let code = match frame {
-        Frame::Error(bytes) => bytes
-            .split(|byte| byte.is_ascii_whitespace())
-            .next()
-            .unwrap_or(b""),
-        Frame::Attribute(_, value) => return redacted_error(value),
-        _ => b"".as_slice(),
-    };
-    let code = match code {
-        b"ERR" | b"WRONGPASS" | b"NOPERM" | b"NOAUTH" | b"LOADING" | b"BUSY" | b"OOM"
-        | b"READONLY" | b"WRONGTYPE" | b"EXECABORT" | b"NOSCRIPT" | b"NOTBUSY" | b"UNKILLABLE"
-        | b"BUSYKEY" | b"NOKEY" | b"IOERR" | b"MISCONF" | b"CROSSSLOT" | b"MOVED" | b"ASK"
-        | b"TRYAGAIN" | b"CLUSTERDOWN" | b"MASTERDOWN" => code,
-        _ => b"ERR".as_slice(),
-    };
-    let mut redacted = Vec::with_capacity(code.len() + b" credential command failed".len());
-    redacted.extend_from_slice(code);
-    redacted.extend_from_slice(b" credential command failed");
-    Frame::Error(Bytes::from(redacted))
 }
 
 fn connection_error(operation: &str, error: &io::Error) {

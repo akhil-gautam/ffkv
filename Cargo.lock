@@ -676,6 +676,39 @@ dependencies = [
 ]
 
 [[package]]
+name = "ffkv-wasm"
+version = "0.1.0"
+dependencies = [
+ "base64 0.22.1",
+ "bson",
+ "bytes",
+ "chrono",
+ "crc32c",
+ "futures-util",
+ "geo",
+ "indexmap",
+ "libc",
+ "num-bigint",
+ "rand 0.9.5",
+ "rayon",
+ "regex",
+ "rphonetic",
+ "rust-stemmers",
+ "rustc_apfloat",
+ "ryu",
+ "serde",
+ "serde_json",
+ "sha1",
+ "sha2",
+ "smallvec",
+ "subtle",
+ "tokio",
+ "unicode-normalization",
+ "wkt",
+ "xxhash-rust",
+]
+
+[[package]]
 name = "find-msvc-tools"
 version = "0.1.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"

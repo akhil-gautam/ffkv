@@ -1635,7 +1635,7 @@ fn page_keys(
     let mut selected = BTreeSet::new();
     for engine in &paused.engines {
         for key in engine.live_keys(now) {
-            let slot = cluster::key_slot(key);
+            let slot = crate::slot::key_slot(key);
             if !visibility[slot as usize]
                 || ranges.is_some_and(|ranges| !in_ranges(slot, ranges))
                 || after.is_some_and(|after| key.as_ref() <= after)
@@ -1696,7 +1696,7 @@ fn counts_paused(paused: &Paused, visibility: &[bool], state: &State) -> io::Res
     }
     for engine in &paused.engines {
         for key in engine.live_keys(now) {
-            let slot = usize::from(cluster::key_slot(key));
+            let slot = usize::from(crate::slot::key_slot(key));
             if visibility[slot] {
                 counts[slot] += 1;
             }
@@ -1840,7 +1840,7 @@ async fn delete_paused(
                 .live_keys(now)
                 .filter(|key| {
                     in_ranges(
-                        cluster::key_slot(key),
+                        crate::slot::key_slot(key),
                         ranges.expect("slot deletion ranges"),
                     )
                 })
@@ -2072,7 +2072,7 @@ fn mutation_key(mutation: &Mutation) -> Option<&Bytes> {
     }
 }
 fn mutation_slot(mutation: &Mutation) -> Option<u16> {
-    mutation_key(mutation).map(|key| cluster::key_slot(key))
+    mutation_key(mutation).map(|key| crate::slot::key_slot(key))
 }
 fn collect_migration_clear(
     engine: &mut Engine,
@@ -2083,7 +2083,7 @@ fn collect_migration_clear(
         let now = 0;
         let keys: Vec<_> = engine
             .live_keys(now)
-            .filter(|key| in_ranges(cluster::key_slot(key), ranges))
+            .filter(|key| in_ranges(crate::slot::key_slot(key), ranges))
             .take(MAX_CLUSTER_PAGE)
             .cloned()
             .collect();
@@ -2183,14 +2183,14 @@ async fn apply_changes_transaction(
     let mut prepared = prepare_replay(commands, 0)?;
     let mut paused = context.pool.pause().await?;
     for keys in prepared.keys.values_mut() {
-        keys.retain(|key| in_ranges(cluster::key_slot(key), ranges));
+        keys.retain(|key| in_ranges(crate::slot::key_slot(key), ranges));
     }
     if prepared.all_keys {
         prepared.all_keys = false;
         let keys = prepared.keys.entry(0).or_default();
         for engine in &paused.engines {
             for key in engine.live_keys(0) {
-                if in_ranges(cluster::key_slot(key), ranges) {
+                if in_ranges(crate::slot::key_slot(key), ranges) {
                     keys.insert(key.clone());
                 }
             }
@@ -2307,7 +2307,7 @@ async fn apply_changes_transaction(
                     command
                         .into_iter()
                         .skip(1)
-                        .filter(|key| in_ranges(cluster::key_slot(key), ranges)),
+                        .filter(|key| in_ranges(crate::slot::key_slot(key), ranges)),
                 );
                 if filtered.len() > 1 {
                     execute_migration_command(
@@ -2327,7 +2327,7 @@ async fn apply_changes_transaction(
             }
             let selected = keys
                 .iter()
-                .filter(|key| in_ranges(cluster::key_slot(key), ranges))
+                .filter(|key| in_ranges(crate::slot::key_slot(key), ranges))
                 .count();
             if selected == 0 {
                 continue;

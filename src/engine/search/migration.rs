@@ -62,7 +62,7 @@ fn ranges_owned(ranges: &[(u16, u16)]) -> io::Result<Vec<(u16, u16)>> {
     Ok(ranges.to_vec())
 }
 fn selected(ranges: &[(u16, u16)], key: &[u8]) -> bool {
-    let slot = crate::cluster::key_slot(key);
+    let slot = crate::slot::key_slot(key);
     ranges
         .iter()
         .any(|&(start, end)| start <= slot && slot <= end)

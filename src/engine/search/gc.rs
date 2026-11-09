@@ -98,78 +98,86 @@ impl Catalog {
         };
         let weak = Arc::downgrade(self);
         let retry = config.retry;
-        let spawned = std::thread::Builder::new()
-            .name("ffkv-search-gc".into())
-            .spawn(move || {
-                let started = Instant::now();
-                let mut compact = Records::default();
-                // Building a fresh slot directory releases holes and whole empty chunks. Bytes
-                // are reference-counted; live document payloads are not serialized or copied.
-                let mut failure = None;
-                for (key, (group, slot)) in slots {
-                    match chunks
-                        .get(group)
-                        .and_then(|g| g.get(slot / CHUNK))
-                        .and_then(|c| c.get(slot % CHUNK))
-                        .and_then(Option::as_ref)
-                    {
-                        Some(bytes) => compact.set(key, bytes.clone()),
-                        None => {
-                            failure = Some("invalid search record slot during garbage collection");
-                            break;
-                        }
+        let work = move || {
+            let started = Instant::now();
+            let mut compact = Records::default();
+            // Building a fresh slot directory releases holes and whole empty chunks. Bytes
+            // are reference-counted; live document payloads are not serialized or copied.
+            let mut failure = None;
+            for (key, (group, slot)) in slots {
+                match chunks
+                    .get(group)
+                    .and_then(|g| g.get(slot / CHUNK))
+                    .and_then(|c| c.get(slot % CHUNK))
+                    .and_then(Option::as_ref)
+                {
+                    Some(bytes) => compact.set(key, bytes.clone()),
+                    None => {
+                        failure = Some("invalid search record slot during garbage collection");
+                        break;
                     }
                 }
-                let old_slots = chunks
-                    .iter()
-                    .flat_map(|g| g.iter())
-                    .map(|c| c.capacity())
-                    .sum::<usize>();
-                let new_slots = compact
-                    .chunks
-                    .iter()
-                    .flat_map(|g| g.iter())
-                    .map(|c| c.capacity())
-                    .sum::<usize>();
-                let mut freed = old_slots
-                    .saturating_sub(new_slots)
-                    .saturating_mul(std::mem::size_of::<Option<bytes::Bytes>>());
-                // The testing delay never holds the catalog lock or blocks command execution.
-                if config.sleep > 0 {
-                    std::thread::sleep(Duration::from_secs(config.sleep));
-                }
-                if let Some(catalog) = weak.upgrade() {
-                    let mut state = catalog.lock();
-                    if state.rollback.is_none() {
-                        if let Some(message) = failure {
-                            state.gc.failures = state.gc.failures.saturating_add(1);
-                            state.gc.next =
-                                after(super::super::super::unix_milliseconds(), config.retry);
-                            eprintln!("search garbage collection: {message}");
-                        } else if state.generation == generation {
-                            state.records = compact;
-                            for index in state.indexes.values_mut() {
-                                for field in index.fields.values_mut() {
-                                    if let super::super::model::FieldIndex::Vector(vector) = field {
-                                        freed = freed.saturating_add(vector.gc_compact());
-                                    }
+            }
+            let old_slots = chunks
+                .iter()
+                .flat_map(|g| g.iter())
+                .map(|c| c.capacity())
+                .sum::<usize>();
+            let new_slots = compact
+                .chunks
+                .iter()
+                .flat_map(|g| g.iter())
+                .map(|c| c.capacity())
+                .sum::<usize>();
+            let mut freed = old_slots
+                .saturating_sub(new_slots)
+                .saturating_mul(std::mem::size_of::<Option<bytes::Bytes>>());
+            // The testing delay never holds the catalog lock or blocks command execution.
+            if config.sleep > 0 {
+                std::thread::sleep(Duration::from_secs(config.sleep));
+            }
+            if let Some(catalog) = weak.upgrade() {
+                let mut state = catalog.lock();
+                if state.rollback.is_none() {
+                    if let Some(message) = failure {
+                        state.gc.failures = state.gc.failures.saturating_add(1);
+                        state.gc.next =
+                            after(super::super::super::unix_milliseconds(), config.retry);
+                        eprintln!("search garbage collection: {message}");
+                    } else if state.generation == generation {
+                        state.records = compact;
+                        for index in state.indexes.values_mut() {
+                            for field in index.fields.values_mut() {
+                                if let super::super::model::FieldIndex::Vector(vector) = field {
+                                    freed = freed.saturating_add(vector.gc_compact());
                                 }
                             }
-                            state.gc.dirty = state.gc.dirty.saturating_sub(dirty);
-                            state.gc.cycles = state.gc.cycles.saturating_add(1);
-                            state.gc.bytes_collected =
-                                state.gc.bytes_collected.saturating_add(freed as u64);
-                            state.gc.last_ms = started.elapsed().as_secs_f64() * 1000.;
-                            state.gc.total_ms += state.gc.last_ms;
-                        } else {
-                            state.gc.denied = state.gc.denied.saturating_add(1);
-                            state.gc.next =
-                                after(super::super::super::unix_milliseconds(), config.retry);
                         }
+                        state.gc.dirty = state.gc.dirty.saturating_sub(dirty);
+                        state.gc.cycles = state.gc.cycles.saturating_add(1);
+                        state.gc.bytes_collected =
+                            state.gc.bytes_collected.saturating_add(freed as u64);
+                        state.gc.last_ms = started.elapsed().as_secs_f64() * 1000.;
+                        state.gc.total_ms += state.gc.last_ms;
+                    } else {
+                        state.gc.denied = state.gc.denied.saturating_add(1);
+                        state.gc.next =
+                            after(super::super::super::unix_milliseconds(), config.retry);
                     }
-                    catalog.gc_running.store(false, Ordering::Release);
                 }
-            });
+                catalog.gc_running.store(false, Ordering::Release);
+            }
+        };
+        #[cfg(not(target_os = "wasi"))]
+        let spawned = std::thread::Builder::new()
+            .name("ffkv-search-gc".into())
+            .spawn(work);
+        // WASI has no threads. No catalog lock is held here, so collect inline.
+        #[cfg(target_os = "wasi")]
+        let spawned = {
+            work();
+            std::io::Result::Ok(())
+        };
         if let Err(error) = spawned {
             let mut state = self.lock();
             state.gc.failures = state.gc.failures.saturating_add(1);

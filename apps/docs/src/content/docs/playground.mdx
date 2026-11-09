@@ -1,0 +1,21 @@
+---
+title: Browser playground
+description: Try ffkv commands in your browser. Two terminals share one in-memory dataset, running ffkv's real command engine compiled to WebAssembly.
+tableOfContents: false
+---
+
+import Playground from '../../components/Playground.astro';
+
+This page runs ffkv's real command engine in your browser via WebAssembly. In-memory only; Lua, persistence, replication and networking aren't available here. Type commands the way you would in [`ffkv-cli`](/getting-started/cli/); replies are printed in the same format.
+
+<Playground />
+
+## How it works
+
+The engine is the same Rust code that executes commands in the server, compiled to WebAssembly and loaded the first time you use a terminal. It runs in this tab; nothing you type is sent anywhere. Reloading the page starts with an empty dataset.
+
+Terminal A and terminal B are two client connections to one dataset. Each has its own selected database, protocol version (`HELLO 3` switches only that terminal to RESP3), subscriptions and blocking command, so a `BLPOP` or `XREAD BLOCK` in one terminal is served by a write in the other, and `PUBLISH` reaches a `SUBSCRIBE` in the other.
+
+Commands that need parts of the server the browser doesn't have, such as `EVAL` and functions, `SAVE` and other persistence, replication, cluster, `MIGRATE`, ACL users and loading modules, answer with an error like `ERR EVAL is not available in the browser playground` rather than pretending to succeed. Command pages in the [reference](/reference/commands/) link here with a short sequence from ffkv's test scenarios: the setup commands, then the example. Press Enter in terminal A to run them in order.
+
+To run the real server, follow the [quickstart](/getting-started/quickstart/) or the [Docker guide](/deployment/docker/).

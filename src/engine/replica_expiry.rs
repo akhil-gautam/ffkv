@@ -18,7 +18,7 @@ impl Engine {
     pub(super) fn holding_expiry(&self, key: &Bytes) -> bool {
         self.replica_mode
             || self.migration_expiry_ranges.as_ref().is_some_and(|ranges| {
-                let slot = crate::cluster::key_slot(key);
+                let slot = crate::slot::key_slot(key);
                 let index = ranges.partition_point(|(start, _)| *start <= slot);
                 index > 0 && slot <= ranges[index - 1].1
             })

@@ -53,6 +53,7 @@ export default defineConfig({
           { label: 'Introduction', link: '/' },
           { label: 'Installation', slug: 'getting-started/installation' },
           { label: 'Quickstart', slug: 'getting-started/quickstart' },
+          { label: 'Browser playground', slug: 'playground' },
           { label: 'Native CLI', slug: 'getting-started/cli' },
           { label: 'MCP integration', slug: 'guides/mcp' },
           { label: 'Management console', slug: 'getting-started/console' },

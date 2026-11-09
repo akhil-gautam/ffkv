@@ -18,3 +18,4 @@ __pycache__/
 /apps/docs/src/content/docs/reference/commands/
 /apps/docs/src/content/docs/reference/extensions.md
 /apps/docs/src/data/commands.json
+/apps/docs/public/playground/

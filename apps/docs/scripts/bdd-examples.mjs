@@ -87,6 +87,8 @@ export async function collectBdd(root, names) {
       const taggedNames = pendingTags.map(tag => tags.get(tag)).filter(Boolean);
       const observed = new Set();
       for (const row of rows) {
+        // Commands this scenario row ran before each example, in order: what the example depends on.
+        const earlier = [];
         for (let s = 0; s < steps.length; s++) {
           const step = steps[s];
           const text = substitute(step.text, row);
@@ -96,15 +98,17 @@ export async function collectBdd(root, names) {
           const vectors = batchStep.test(text) ? document : [document];
           if (!Array.isArray(vectors)) throw new Error(`Expected command list at ${relative}:${step.line}`);
           for (const argv of vectors) {
-            const name = vectorName(argv, names);
-            if (!name) continue;
-            observed.add(name);
             const next = batchStep.test(text) ? null : steps[s + 1];
             let expectation = null;
             if (next && /^(?:the reply |client "[^"]+" receives:)/.test(next.text)) {
               expectation = { text: substitute(next.text, row), document: next.document === null ? null : substitute(next.document, row).trim() };
             }
-            coverage.get(name).examples.push({ ...scenario, line: step.line, argv, step: text, parameters: outline ? row : null, expectation, fixtureDependent: /\{\{[^}]+\}\}/.test(JSON.stringify(argv)), binary: argv.some(value => typeof value === 'object' && value !== null && 'base64' in value) });
+            const name = vectorName(argv, names);
+            if (name) {
+              observed.add(name);
+              coverage.get(name).examples.push({ ...scenario, line: step.line, argv, step: text, parameters: outline ? row : null, expectation, setup: [...earlier], fixtureDependent: /\{\{[^}]+\}\}/.test(JSON.stringify(argv)), binary: argv.some(value => typeof value === 'object' && value !== null && 'base64' in value) });
+            }
+            earlier.push({ argv, error: /error/i.test(expectation?.text ?? '') });
           }
         }
       }

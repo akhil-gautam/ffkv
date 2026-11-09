@@ -12,6 +12,11 @@ impl Config {
         if workers == 0 && self.on_timeout_strict {
             return Err("RETURN_STRICT requires WORKERS greater than zero".into());
         }
+        // WASI has no threads; searches always run on the calling thread there.
+        #[cfg(target_os = "wasi")]
+        if workers != 0 {
+            return Err("Cannot create search workers: WASI has no threads".into());
+        }
         let pool = if workers == 0 {
             None
         } else {

@@ -14,7 +14,6 @@ use bytes::Bytes;
 use std::collections::{HashMap, HashSet};
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, ErrorKind};
-use std::os::unix::fs::{FileExt, MetadataExt};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, RwLock, Weak};
@@ -23,6 +22,54 @@ const SEGMENT_MAGIC: &[u8; 8] = b"FFKVB001";
 const RECORD_MAGIC: &[u8; 8] = b"FFKVR001";
 const HEADER: u64 = 64;
 const PREFIX: &str = "ffkv-blob-v1-";
+
+/// Positional file IO and file identity. WASI preview 1 offers neither on
+/// stable Rust, so a store never opens there.
+#[cfg(not(target_os = "wasi"))]
+mod platform {
+    use std::fs::{File, Metadata};
+    use std::io;
+    use std::os::unix::fs::{FileExt, MetadataExt};
+
+    pub(super) fn supported() -> io::Result<()> {
+        Ok(())
+    }
+    /// (device, inode)
+    pub(super) fn identity(metadata: &Metadata) -> io::Result<(u64, u64)> {
+        Ok((metadata.dev(), metadata.ino()))
+    }
+    pub(super) fn read_at(file: &File, bytes: &mut [u8], offset: u64) -> io::Result<usize> {
+        file.read_at(bytes, offset)
+    }
+    pub(super) fn write_at(file: &File, bytes: &[u8], offset: u64) -> io::Result<usize> {
+        file.write_at(bytes, offset)
+    }
+}
+
+#[cfg(target_os = "wasi")]
+mod platform {
+    use std::fs::{File, Metadata};
+    use std::io;
+
+    fn unsupported() -> io::Error {
+        io::Error::new(
+            io::ErrorKind::Unsupported,
+            "disk payload storage is not available on WASI",
+        )
+    }
+    pub(super) fn supported() -> io::Result<()> {
+        Err(unsupported())
+    }
+    pub(super) fn identity(_: &Metadata) -> io::Result<(u64, u64)> {
+        Err(unsupported())
+    }
+    pub(super) fn read_at(_: &File, _: &mut [u8], _: u64) -> io::Result<usize> {
+        Err(unsupported())
+    }
+    pub(super) fn write_at(_: &File, _: &[u8], _: u64) -> io::Result<usize> {
+        Err(unsupported())
+    }
+}
 
 #[derive(Clone, Debug)]
 pub struct Config {
@@ -218,6 +265,7 @@ impl Cache {
 
 impl Store {
     pub fn open(config: Config) -> io::Result<Arc<Self>> {
+        platform::supported()?;
         if config.segment_bytes < HEADER * 2 + 1 {
             return Err(io::Error::new(
                 ErrorKind::InvalidInput,
@@ -252,14 +300,15 @@ impl Store {
                 Err(error) => return Err(error),
             }
             let metadata = file.metadata()?;
+            let (device, inode) = platform::identity(&metadata)?;
             physical_bytes = add(physical_bytes, metadata.len())?;
             obsolete.push(Obsolete {
                 path: entry.path(),
                 generation,
                 id,
                 len: metadata.len(),
-                device: metadata.dev(),
-                inode: metadata.ino(),
+                device,
+                inode,
             });
         }
         let generation = loop {
@@ -350,8 +399,7 @@ impl Store {
         while let Some(obsolete) = writer.obsolete.last() {
             let metadata = fs::symlink_metadata(&obsolete.path)?;
             if !metadata.file_type().is_file()
-                || metadata.dev() != obsolete.device
-                || metadata.ino() != obsolete.inode
+                || platform::identity(&metadata)? != (obsolete.device, obsolete.inode)
                 || metadata.len() != obsolete.len
             {
                 return Err(invalid("obsolete segment changed during recovery"));
@@ -517,7 +565,7 @@ impl Store {
 
     fn write_at(&self, segment: &Segment, mut bytes: &[u8], mut offset: u64) -> io::Result<()> {
         while !bytes.is_empty() {
-            let written = match segment.file.write_at(bytes, offset) {
+            let written = match platform::write_at(&segment.file, bytes, offset) {
                 Ok(0) => return Err(io::Error::new(ErrorKind::WriteZero, "short segment write")),
                 Ok(written) => written,
                 Err(error) if error.kind() == ErrorKind::Interrupted => continue,
@@ -755,7 +803,7 @@ fn verify_segment_header(file: &File, generation: [u8; 16], id: u64) -> io::Resu
 
 fn read_exact_at(file: &File, mut bytes: &mut [u8], mut offset: u64) -> io::Result<()> {
     while !bytes.is_empty() {
-        match file.read_at(bytes, offset) {
+        match platform::read_at(file, bytes, offset) {
             Ok(0) => return Err(invalid("truncated payload segment or record")),
             Ok(read) => {
                 offset = offset
@@ -804,6 +852,7 @@ fn parse_name(name: &str) -> Option<([u8; 16], u64)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::os::unix::fs::FileExt;
     use std::sync::Barrier;
     use std::thread;
 

@@ -13,7 +13,7 @@ use tokio::{
     net::TcpStream,
 };
 
-use crate::protocol::Resp;
+use crate::{protocol::Resp, rdb::MigrateItem};
 
 const MAX_REPLY_BYTES: usize = 64 * 1024;
 
@@ -28,14 +28,6 @@ pub struct MigrateOptions {
     /// AUTH arguments, excluding the command name: password, or username/password.
     pub auth: Option<Vec<Bytes>>,
     pub keys: Vec<Bytes>,
-}
-
-#[derive(Debug)]
-pub struct MigrateItem {
-    pub key: Bytes,
-    pub dump: Bytes,
-    /// Absolute Unix expiration in milliseconds; None means persistent.
-    pub expires_at: Option<i64>,
 }
 
 #[derive(Debug)]

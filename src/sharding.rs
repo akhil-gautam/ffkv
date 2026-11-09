@@ -969,7 +969,7 @@ impl Paused {
         let visible = |key: &Bytes| {
             visible_slots.is_none_or(|slots| {
                 slots
-                    .get(crate::cluster::key_slot(key) as usize)
+                    .get(crate::slot::key_slot(key) as usize)
                     .copied()
                     .unwrap_or(false)
             })
@@ -1460,7 +1460,7 @@ mod tests {
             .unwrap();
         let hidden = (0..1000)
             .map(|index| Bytes::from(format!("hidden:{index}")))
-            .find(|candidate| crate::cluster::key_slot(candidate) != crate::cluster::key_slot(&key))
+            .find(|candidate| crate::slot::key_slot(candidate) != crate::slot::key_slot(&key))
             .unwrap();
         let mut engine = Engine::new();
         for key in [&key, &hidden] {
@@ -1477,7 +1477,7 @@ mod tests {
         let (pool, mut workers) = Pool::start(engine, 2, persistence, state);
         let paused = pool.pause().await.unwrap();
         let mut visible = vec![false; 16_384];
-        visible[crate::cluster::key_slot(&key) as usize] = true;
+        visible[crate::slot::key_slot(&key) as usize] = true;
         assert_eq!(
             paused.random_key(Engine::now(), Some(&visible)),
             Resp::Bulk(Some(key))

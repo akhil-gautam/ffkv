@@ -608,7 +608,7 @@ impl Completion<'_> {
             };
             if let Some(key) = slot_key {
                 cluster.record(
-                    cluster::key_slot(key),
+                    crate::slot::key_slot(key),
                     self.cpu_ns / 1000,
                     self.input_bytes,
                     self.output_bytes,

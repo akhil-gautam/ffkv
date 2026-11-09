@@ -79,7 +79,7 @@ ffkv follows [Semantic Versioning 2.0.0](https://semver.org/). A version is `MAJ
 - **Minor** (`0.1.x` → `0.2.0`): new behavior. While the major version is 0, a minor release may also break compatibility; every break is listed in the changelog.
 - **Major** (from `1.0.0`): any incompatible change, such as an on-disk format a previous release can't read.
 
-`Cargo.toml` holds the version. `scripts/version.py` keeps the copies that other tools need (`Cargo.lock`, the docs and console `package.json` files, and the Helm chart) in step, and the handbook reads it from `Cargo.toml` when it builds. `ffkv --version` reports the same value.
+`Cargo.toml` holds the version. `scripts/version.py` keeps the copies that other tools need (`Cargo.lock`, the browser playground crate's `crates/ffkv-wasm/Cargo.toml`, the docs and console `package.json` files, and the Helm chart) in step, and the handbook reads it from `Cargo.toml` when it builds. `ffkv --version` reports the same value.
 
 To cut a release:
 

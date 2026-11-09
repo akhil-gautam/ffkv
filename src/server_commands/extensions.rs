@@ -11,7 +11,6 @@ use crate::{
 };
 use abi::{Command, CommandFn, Context};
 use bytes::Bytes;
-use libloading::Library;
 use std::{
     collections::{BTreeMap, HashSet},
     ffi::c_int,
@@ -22,6 +21,14 @@ use std::{
     },
 };
 use tokio::sync::Mutex;
+
+#[cfg(not(target_os = "wasi"))]
+use libloading::Library;
+/// WASI has no dynamic loader, so no module is ever loaded there.
+#[cfg(target_os = "wasi")]
+enum Library {}
+
+type UnloadFn = unsafe extern "C" fn(*mut Context) -> c_int;
 
 pub struct Extensions {
     modules: RwLock<BTreeMap<String, Arc<Module>>>,
@@ -34,7 +41,7 @@ struct Module {
     args: Vec<Bytes>,
     commands: Vec<Command>,
     active: AtomicUsize,
-    unload: Option<unsafe extern "C" fn(*mut Context) -> c_int>,
+    unload: Option<UnloadFn>,
     // Closed only after successful OnUnload and all invocation pins are gone.
     _library: std::mem::ManuallyDrop<Library>,
 }
@@ -279,19 +286,9 @@ impl Extensions {
         {
             return err("module library already loaded");
         }
-        let library = match unsafe { Library::new(&canonical) } {
-            Ok(l) => l,
-            Err(e) => return err(format!("cannot load module library: {e}")),
-        };
-        let onload: CommandFn = match unsafe { library.get::<CommandFn>(b"RedisModule_OnLoad\0") } {
-            Ok(f) => *f,
-            Err(e) => return err(format!("missing RedisModule_OnLoad: {e}")),
-        };
-        let unload = unsafe {
-            library
-                .get::<unsafe extern "C" fn(*mut Context) -> c_int>(b"RedisModule_OnUnload\0")
-                .ok()
-                .map(|f| *f)
+        let (library, onload, unload) = match unsafe { open_library(&canonical) } {
+            Ok(opened) => opened,
+            Err(reply) => return reply,
         };
         let mut ctx = Context::loading(
             config,
@@ -388,6 +385,33 @@ impl Extensions {
             let _ = self.unload(&Bytes::from(name)).await;
         }
     }
+}
+
+/// Loads `path` and resolves the module entry points.
+#[cfg(not(target_os = "wasi"))]
+unsafe fn open_library(path: &Path) -> Result<(Library, CommandFn, Option<UnloadFn>), Resp> {
+    let library = match unsafe { Library::new(path) } {
+        Ok(l) => l,
+        Err(e) => return Err(err(format!("cannot load module library: {e}"))),
+    };
+    let onload: CommandFn = match unsafe { library.get::<CommandFn>(b"RedisModule_OnLoad\0") } {
+        Ok(f) => *f,
+        Err(e) => return Err(err(format!("missing RedisModule_OnLoad: {e}"))),
+    };
+    let unload = unsafe {
+        library
+            .get::<UnloadFn>(b"RedisModule_OnUnload\0")
+            .ok()
+            .map(|f| *f)
+    };
+    Ok((library, onload, unload))
+}
+
+#[cfg(target_os = "wasi")]
+unsafe fn open_library(_: &Path) -> Result<(Library, CommandFn, Option<UnloadFn>), Resp> {
+    Err(err(
+        "cannot load module library: dynamic loading is not available on WASI",
+    ))
 }
 type ModuleLoadArguments<'a> = (Vec<(Bytes, Bytes)>, &'a [Bytes]);
 

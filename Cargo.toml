@@ -1,3 +1,7 @@
+[workspace]
+members = [".", "crates/ffkv-wasm"]
+default-members = ["."]
+
 [package]
 name = "ffkv"
 version = "0.1.0"
@@ -65,3 +69,6 @@ cc = "1.2"
 [profile.release]
 lto = "thin"
 codegen-units = 1
+
+[profile.release.package.ffkv-wasm]
+opt-level = "s"

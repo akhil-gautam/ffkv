@@ -4,6 +4,8 @@ import { fileURLToPath } from 'node:url';
 import { collectBdd } from './bdd-examples.mjs';
 import { familyNotes, moduleNote, replicationNote, syntaxCorrections } from './reference-notes.mjs';
 import { extensionFamilies } from './extension-reference.mjs';
+import { minimizeSequence, playgroundRefuses } from './playground-commands.mjs';
+import { Playground } from '../src/lib/playground/ffkv.ts';
 
 const root = fileURLToPath(new URL('../../../', import.meta.url));
 const docs = path.join(root, 'apps/docs/src/content/docs/reference');
@@ -68,6 +70,11 @@ function argumentRows(arguments_, depth = 0) {
   }
   return rows;
 }
+// Concise source-asserted vectors first; fixture-dependent and negative examples last.
+function rankedExamples(name) {
+  const rank = example => Number(example.fixtureDependent) * 4 + Number(/error/i.test(example.expectation?.text ?? '')) * 2 + Number(!example.expectation);
+  return [...coverage.get(name).examples].sort((a, b) => rank(a) - rank(b) || JSON.stringify(a.argv).length - JSON.stringify(b.argv).length);
+}
 function evidenceSection(name, level = 2) {
   const data = coverage.get(name);
   const heading = '#'.repeat(level);
@@ -75,8 +82,7 @@ function evidenceSection(name, level = 2) {
   if (!data.scenarios.length) return text + 'No matching tagged scenario or extracted command vector is present in the current `tests/bdd/features` corpus. Absence here is not proof that the command is untested elsewhere; see the source-specific regression notes above.\n\n';
   text += 'These are **source observations, not a test run performed by this documentation build**. A tag identifies scenario intent; an extracted vector identifies a command invocation, which may intentionally produce an error. Scenarios may require setup, multiple connections, persistence, cluster nodes or native-module fixtures.\n\n';
   text += data.scenarios.map(scenario => `- **${inline(scenario.name)}**${scenario.outline ? ' (Scenario Outline)' : ''} — \`${scenario.file}:${scenario.line}\`; ${scenario.tagged ? 'command tag' : 'invocation observed'}${scenario.tagged && scenario.observed ? ' and invocation observed' : ''}.`).join('\n') + '\n\n';
-  const rank = example => Number(example.fixtureDependent) * 4 + Number(/error/i.test(example.expectation?.text ?? '')) * 2 + Number(!example.expectation);
-  const examples = [...data.examples].sort((a, b) => rank(a) - rank(b) || JSON.stringify(a.argv).length - JSON.stringify(b.argv).length);
+  const examples = rankedExamples(name);
   const seenVectors = new Set();
   const seenScenarios = new Set();
   const selected = [];
@@ -105,12 +111,52 @@ function evidenceSection(name, level = 2) {
   }
   return text;
 }
+// "Try in playground" links. Pages of commands the browser playground refuses get none.
+const playgroundRefused = await playgroundRefuses(root);
+// Candidate sequences are replayed through the real playground engine so a link only
+// ever carries commands that work on a fresh dataset.
+const wasmFile = path.join(root, 'apps/docs/public/playground/ffkv.wasm');
+const playground = await Playground.load(await readFile(wasmFile).catch(() => {
+  throw new Error(`Missing ${path.relative(root, wasmFile)}; run npm --prefix apps/docs run build:wasm first`);
+}));
+const playgroundCounts = { sequence: 0, fallback: 0, refused: 0 };
+// Quote one argument the way ffkv-cli's tokenizer reads it back.
+const cliArgument = value => /^[^\s"'\\]+$/.test(value) ? value : `"${value.replace(/[\\"]/g, '\\$&').replaceAll('\n', '\\n').replaceAll('\r', '\\r').replaceAll('\t', '\\t')}"`;
+const cliLine = argv => argv.map(value => cliArgument(String(value))).join(' ');
+const plainVector = argv => argv.every(value => ['string', 'number'].includes(typeof value)) && !/\{\{[^}]+\}\}/.test(JSON.stringify(argv));
+// The best minimized scenario sequence (setup commands, then a non-error example) that
+// replays cleanly: examples whose reply shows data before ones answering nil or empty,
+// then the shortest, then the example ranking order.
+const emptyReply = /^\((?:nil|empty collection|empty map)\)\n$/;
+function playgroundSequence(name) {
+  const seen = new Set();
+  const best = rankedExamples(name)
+    .filter(example => !/error/i.test(example.expectation?.text ?? '') && plainVector(example.argv) && example.setup.every(step => plainVector(step.argv)))
+    // Setup steps the scenario expects to fail change nothing; leave them out.
+    .map(example => [...example.setup.filter(step => !step.error).map(step => cliLine(step.argv)), cliLine(example.argv)])
+    .filter(lines => lines.length <= 30 && !seen.has(lines.join('\n')) && seen.add(lines.join('\n')))
+    .map(lines => minimizeSequence(playground, lines))
+    .filter(sequence => sequence !== null && sequence.lines.length <= 12)
+    .sort((a, b) => emptyReply.test(a.output) - emptyReply.test(b.output) || a.lines.length - b.lines.length)[0];
+  return best?.lines ?? null;
+}
+const queryValue = line => encodeURIComponent(line).replace(/[!'()*]/g, character => `%${character.charCodeAt(0).toString(16).toUpperCase()}`);
+function playgroundLink(name) {
+  if (playgroundRefused(name)) {
+    playgroundCounts.refused += 1;
+    return '';
+  }
+  // Without a working scenario sequence, pre-fill just the command name for the reader to complete.
+  const lines = playgroundSequence(name);
+  playgroundCounts[lines ? 'sequence' : 'fallback'] += 1;
+  return ` · [Try in playground](/playground/?${(lines ?? [`${name} `]).map(line => `cmd=${queryValue(line)}`).join('&')})`;
+}
 for (const command of catalog.commands) {
   const meta = metadata.commands[command.name.toLowerCase().replaceAll(' ', '|')];
   const notes = familyNotes[command.group];
   const syntax = syntaxCorrections[command.name] ?? command.syntax;
   let text = frontmatter(command.name, command.description);
-  text += `${command.description}\n\n[Browse all commands](/reference/commands/) · [Upstream source documentation](${command.url})\n\n`;
+  text += `${command.description}\n\n[Browse all commands](/reference/commands/) · [Upstream source documentation](${command.url})${playgroundLink(command.name)}\n\n`;
   text += `| Reference field | Value |\n| --- | --- |\n| Canonical name | \`${inline(command.name)}\` |\n| Catalog group | ${inline(command.group)} |\n| Upstream since | ${inline(command.since)} — upstream Redis/module version, **not an ffkv release** |\n| Pinned catalog | Redis ${inline(catalog.version)} |\n\n`;
   text += `## Syntax\n\n${code(syntax)}\n\n`;
   if (Object.hasOwn(syntaxCorrections, command.name)) text += command.name === 'FT.AGGREGATE' ? 'The pinned catalog leaves this syntax empty. This grammar is supplied from `src/engine/search/pipeline.rs` and the actual aggregation scenarios in `tests/bdd/features/search.feature`; pipeline clauses may be repeated.\n\n' : 'The catalog’s command-name typography is corrected here to the exact canonical spelling; the source catalog is unchanged.\n\n';
@@ -135,7 +181,7 @@ for (const command of catalog.commands) {
 }
 const index = catalog.commands.map(command => ({ name: command.name, slug: slug(command.name), group: command.group, description: command.description, since: command.since }));
 add(path.join(root, 'apps/docs/src/data/commands.json'), JSON.stringify({ generatedBy: 'apps/docs/scripts/generate-reference.mjs', commands: index }) + '\n');
-add(path.join(commandsDirectory, 'index.mdx'), frontmatter('Command reference', 'Search all 486 canonical commands by name, description or group.', false) + 'import CommandExplorer from "../../../../components/CommandExplorer.astro";\n\nThe pinned Redis 8.10 catalog contains **486 canonical entries**. Every entry has its own syntax, upstream attribution, ffkv caveats, metadata when available and real BDD source evidence. Catalog coverage does not imply every upstream option combination is identical.\n\n<CommandExplorer />\n\n## Beyond the catalog\n\n[Extension API](/reference/extensions/) documents all 11 native FQ commands, FFKV storage administration, Bloom/Cuckoo filters, Count-Min Sketch, Top-K, t-digest and additional JSON arithmetic. Container command roots are not counted as extra catalog entries.\n\n## Reading command pages\n\n- “Upstream since” is a Redis/module version, never an ffkv release. Complexity and metadata flags are upstream reference data, not ffkv benchmarks.\n- Syntax follows the canonical catalog with explicit command-name typo fixes. The empty FT.AGGREGATE grammar is filled from implementation and BDD sources.\n- BDD examples are JSON argument vectors extracted safely from actual feature docstrings, including actual Scenario Outline rows. Fixture tokens and base64 payloads remain explicitly identified.\n- Listed scenarios are source coverage, not a test execution claim by the docs build. Error assertions are retained as errors. Setup and multi-connection order remain in the named feature.\n- Need a running-server view? Use `COMMAND INFO`, `COMMAND DOCS`, `COMMAND LIST` and `COMMAND COUNT`.\n\nGeneration is offline and requires only Node: `npm --prefix apps/docs run generate`. Sources are `src/command_catalog.json`, `src/command_metadata.json`, the Rust extension registries and `tests/bdd/features`.\n');
+add(path.join(commandsDirectory, 'index.mdx'), frontmatter('Command reference', 'Search all 486 canonical commands by name, description or group.', false) + 'import CommandExplorer from "../../../../components/CommandExplorer.astro";\n\nThe pinned Redis 8.10 catalog contains **486 canonical entries**. Every entry has its own syntax, upstream attribution, ffkv caveats, metadata when available and real BDD source evidence. Catalog coverage does not imply every upstream option combination is identical.\n\n<CommandExplorer />\n\n## Beyond the catalog\n\n[Extension API](/reference/extensions/) documents all 11 native FQ commands, FFKV storage administration, Bloom/Cuckoo filters, Count-Min Sketch, Top-K, t-digest and additional JSON arithmetic. Container command roots are not counted as extra catalog entries.\n\n## Reading command pages\n\n- “Upstream since” is a Redis/module version, never an ffkv release. Complexity and metadata flags are upstream reference data, not ffkv benchmarks.\n- Syntax follows the canonical catalog with explicit command-name typo fixes. The empty FT.AGGREGATE grammar is filled from implementation and BDD sources.\n- BDD examples are JSON argument vectors extracted safely from actual feature docstrings, including actual Scenario Outline rows. Fixture tokens and base64 payloads remain explicitly identified.\n- Listed scenarios are source coverage, not a test execution claim by the docs build. Error assertions are retained as errors. Setup and multi-connection order remain in the named feature.\n- “Try in playground” opens the [browser playground](/playground/) with commands from one BDD scenario: the setup it ran, then the example. The docs build replays every such sequence through the playground engine on an empty dataset and keeps it only if no command fails or blocks, dropping setup steps whose removal leaves the example’s reply byte-identical; otherwise the link pre-fills just the command name. Commands the playground cannot run have no link.\n- Need a running-server view? Use `COMMAND INFO`, `COMMAND DOCS`, `COMMAND LIST` and `COMMAND COUNT`.\n\nGeneration is offline and requires Node plus the built playground engine (`npm --prefix apps/docs run build:wasm`): `npm --prefix apps/docs run generate`. Sources are `src/command_catalog.json`, `src/command_metadata.json`, the Rust extension registries, `tests/bdd/features` and `src/wasm/session.rs`.\n');
 let extensions = frontmatter('Extension API', 'Complete native FQ and FFKV administration plus probabilistic and additional JSON commands outside the canonical catalog.', false);
 extensions += 'The 486-entry canonical catalog is not the entire ffkv command registry. This page covers the additional callable APIs implemented by the native queues, storage administration, filter/sketch and JSON handlers. These commands use the same RESP connection and native CLI; no Redis module installation is required for the built-in datatypes.\n\n[Canonical command explorer](/reference/commands/) · [CLI and binary input](/getting-started/cli/) · [Compatibility boundaries](/concepts/compatibility/)\n\nAll syntax below is checked against current source registrations. Arguments are byte strings unless a numeric/keyword form is specified. The common 8 MiB/1,024-argument ingress and origin-specific reply budgets still apply. Normal documentation generation never runs a server, native binary or network request.\n\n';
 for (const family of extensionFamilies) {
@@ -173,3 +219,4 @@ for (const [file, content] of output) {
   if (previous !== content) await writeFile(file, content);
 }
 console.log(`Generated ${catalog.commands.length} canonical command pages, ${extensionNames.size} extension contracts and the command explorer index (offline).`);
+console.log(`Playground links: ${playgroundCounts.sequence} replay-verified scenario sequences, ${playgroundCounts.fallback} command-name fallbacks, ${playgroundCounts.refused} commands refused by the playground (no link).`);

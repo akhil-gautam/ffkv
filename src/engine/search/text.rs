@@ -3,7 +3,7 @@ use rust_stemmers::{Algorithm, Stemmer};
 use std::borrow::Borrow;
 use std::collections::{BTreeMap, BTreeSet};
 use std::ops::Bound;
-use std::sync::{Arc, LazyLock};
+use std::sync::Arc;
 use unicode_normalization::{UnicodeNormalization, char::is_combining_mark};
 
 /// Search normalization is shared by indexing, query expansion and sortable strings.
@@ -15,12 +15,16 @@ pub fn normalize(input: &str) -> String {
         .collect()
 }
 
+/// Chinese word segmentation needs jieba's embedded dictionary (megabytes,
+/// decompressed through C zstd), which the WASI playground build leaves out;
+/// there "chinese" is an unsupported language rather than a silent fallback.
+pub(super) const CHINESE_SEGMENTATION: bool = cfg!(not(target_os = "wasi"));
+
 pub fn language_supported(language: &str) -> bool {
-    algorithm(language).is_some()
-        || matches!(
-            language.to_ascii_lowercase().as_str(),
-            "chinese" | "malay" | "tagalog" | "none"
-        )
+    let language = language.to_ascii_lowercase();
+    algorithm(&language).is_some()
+        || matches!(language.as_str(), "malay" | "tagalog" | "none")
+        || (CHINESE_SEGMENTATION && language == "chinese")
 }
 fn algorithm(language: &str) -> Option<Algorithm> {
     Some(match language.to_ascii_lowercase().as_str() {
@@ -75,6 +79,7 @@ pub fn tokenize_indexed(
     stopwords: &BTreeSet<String>,
     min_stem: usize,
 ) -> Vec<Token> {
+    #[cfg(not(target_os = "wasi"))]
     if language.eq_ignore_ascii_case("chinese") {
         return tokenize_chinese(input, stopwords);
     }
@@ -142,7 +147,9 @@ pub fn tokenize_indexed(
     out
 }
 
+#[cfg(not(target_os = "wasi"))]
 fn tokenize_chinese(input: &str, stopwords: &BTreeSet<String>) -> Vec<Token> {
+    use std::sync::LazyLock;
     static DICTIONARY: LazyLock<jieba_rs::Jieba> = LazyLock::new(jieba_rs::Jieba::new);
     let no_stops = BTreeSet::new();
     let mut out = Vec::new();

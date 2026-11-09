@@ -411,19 +411,19 @@ impl Engine {
         &mut self,
         keys: &[Bytes],
         now: i64,
-    ) -> Result<Vec<crate::migrate::MigrateItem>, Resp> {
+    ) -> Result<Vec<crate::rdb::MigrateItem>, Resp> {
         let mut items = Vec::new();
         let mut budget = ReplyBudget::new(self.reply_limit);
         for key in keys {
             if items
                 .iter()
-                .any(|item: &crate::migrate::MigrateItem| item.key == *key)
+                .any(|item: &crate::rdb::MigrateItem| item.key == *key)
             {
                 continue;
             }
             if let Some(dump) = self.dump_key(key, now)? {
                 budget.charge(1, key.len() + dump.len())?;
-                items.push(crate::migrate::MigrateItem {
+                items.push(crate::rdb::MigrateItem {
                     key: key.clone(),
                     dump,
                     expires_at: self.entries.get(key).and_then(|e| e.expires_at),
@@ -435,7 +435,7 @@ impl Engine {
     /// Parent holds the source-key write barrier from capture through acknowledgment.
     pub fn ack_migrate(
         &mut self,
-        items: &[crate::migrate::MigrateItem],
+        items: &[crate::rdb::MigrateItem],
         indices: &[usize],
         now: i64,
     ) -> Resp {

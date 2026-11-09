@@ -755,7 +755,8 @@ impl VectorValue {
             level += 1;
         }
         let collect = || self.candidates(&embedding, level, ef, old);
-        let candidates = if cas {
+        // WASI has no threads, so collection always runs inline there.
+        let candidates = if cas && cfg!(not(target_os = "wasi")) {
             std::thread::scope(|scope| scope.spawn(collect).join())
                 .map_err(|_| err("vector background worker failed"))?
         } else {
@@ -2164,7 +2165,8 @@ impl Engine {
             };
             &prepared
         };
-        let hits = if options.nothread {
+        // WASI has no threads, so the search always runs inline there.
+        let hits = if options.nothread || cfg!(target_os = "wasi") {
             value.search(query, &options)
         } else {
             match std::thread::scope(|scope| scope.spawn(|| value.search(query, &options)).join()) {

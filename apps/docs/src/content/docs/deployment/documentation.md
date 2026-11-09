@@ -5,11 +5,11 @@ sidebar:
   order: 3
 ---
 
-The handbook is a separate **Astro + Starlight** application in `apps/docs`. It builds to static HTML, CSS, JavaScript and a local Pagefind search index. It does not require a running ffkv instance, a Redis server, the React console, a hosted search service or a database.
+The handbook is a separate **Astro + Starlight** application in `apps/docs`. It builds to static HTML, CSS, JavaScript, a local Pagefind search index and the [browser playground](/playground/)'s WebAssembly engine. It does not require a running ffkv instance, a Redis server, the React console, a hosted search service or a database.
 
 ## Run locally
 
-Use Node **22.23.4 or newer** and npm. From the repository root:
+Use Node **22.23.4 or newer** and npm, plus Rust with the `wasm32-wasip1` target (`rustup target add wasm32-wasip1`) for the playground engine. From the repository root:
 
 ```sh
 npm --prefix apps/docs ci
@@ -40,7 +40,7 @@ npm --prefix apps/docs run build
 npm --prefix apps/docs run preview
 ```
 
-`check` runs Astro's content and TypeScript diagnostics. `build` creates `apps/docs/dist`, builds Pagefind, then audits **every generated HTML page** for page metadata, a single page heading, duplicate IDs, local links/assets and fragment destinations. It also checks every canonical command route and the production search index. A broken reference fails the build.
+`check`, `dev` and `build` first compile the playground engine (`cargo build --release --target wasm32-wasip1 -p ffkv-wasm`, copied to the gitignored `apps/docs/public/playground/ffkv.wasm`), because the reference generator uses it. `build` then runs `scripts/playground-smoke.mjs`, which loads the engine in Node, checks real command replies and replays every generated "Try in playground" sequence on an empty dataset. Rerun `npm --prefix apps/docs run build:wasm` after changing Rust sources while the dev server runs. `check` runs Astro's content and TypeScript diagnostics. `build` creates `apps/docs/dist`, builds Pagefind, and audits **every generated HTML page** for page metadata, a single page heading, duplicate IDs, local links/assets and fragment destinations. It also checks every canonical command route, the production search index and the playground engine. A broken reference fails the build.
 
 The preview serves the built site on loopback. It is a local smoke server, not a production process manager. Inspect the URL printed by Astro. The developer preview and production site are public documentation; neither presents a console token prompt.
 
@@ -104,12 +104,13 @@ For a hosted build service, use these settings:
 | --- | --- |
 | Checkout/build root | Repository root, not `apps/docs` alone |
 | Node | 22.23.4 or newer |
+| Rust | Stable, with the `wasm32-wasip1` target |
 | Install | `npm --prefix apps/docs ci` |
 | Build | `npm --prefix apps/docs run build` |
 | Publish directory | `apps/docs/dist` |
 | Environment | `DOCS_SITE` and, when needed, `DOCS_BASE` |
 
-The generator reads repository metadata, Rust extension registrations and BDD features outside `apps/docs`. Deploying a checkout of only the frontend directory does not provide these inputs.
+The generator reads repository metadata, Rust extension registrations and BDD features outside `apps/docs`, and the playground engine is compiled from the Rust sources. Deploying a checkout of only the frontend directory does not provide these inputs.
 
 ## Publish under a project subpath
 
@@ -129,7 +130,7 @@ Mount the contents of `dist` at that prefix on the production host. A build made
 
 Serve directories through their `index.html`, and serve `404.html` with **HTTP 404** for unknown routes. Do not configure a single-page-app rewrite of all requests to the homepage: these are real static routes, and a missing command should remain a genuine 404.
 
-Keep the entire output, including `_astro`, `pagefind`, sitemap and favicon assets. Pagefind runs in the browser and fetches its local index/chunks; dropping that directory breaks production search. Use HTTPS on the public host, compress text assets, and allow `.wasm` with the `application/wasm` content type when the search build emits WebAssembly.
+Keep the entire output, including `_astro`, `pagefind`, `playground`, sitemap and favicon assets. Pagefind runs in the browser and fetches its local index/chunks; dropping that directory breaks production search. Use HTTPS on the public host, compress text assets, and serve `.wasm` with the `application/wasm` content type (the playground engine always, the search build when it emits WebAssembly) so browsers can compile it while downloading.
 
 The Cloudflare Pages target is configured in `apps/docs/wrangler.jsonc` and the package deployment scripts; no deployment credential is stored in the repository. Other hosting providers require their own publication setup. Local builds and previews need no hosting credentials.
 
@@ -151,10 +152,11 @@ Inputs include:
 - `src/command_metadata.json`: attributed upstream argument/flag/key metadata.
 - Rust registrations and the curated source-backed extension definitions in `apps/docs/scripts`.
 - `tests/bdd/features`: real scenario names, argument vectors and source assertions.
+- `src/wasm/session.rs` and the built playground engine: which commands the playground refuses, and replay checks for each command page's "Try in playground" sequence (the scenario's setup commands, then the example). A sequence is kept only if no command fails or blocks on an empty dataset, and setup steps are dropped when the example's reply is byte-identical without them; otherwise the link pre-fills just the command name.
 
 Do not edit generated command pages, the generated extension page or `src/data/commands.json`. Update source metadata or the relevant generator helper, regenerate, then review the result. The generator rejects duplicate names/slugs, missing catalog coverage and unknown extension registrations. It only replaces or removes content carrying its ownership marker; it does not delete handwritten pages.
 
-A documentation build **does not execute the KV BDD scenarios**. Extracted examples identify source evidence and may intentionally fail or depend on fixtures. See [behavioral testing](/contributing/testing/) for the real full-catalog runtime gate.
+A documentation build **does not execute the KV BDD scenarios** against a server. Extracted examples identify source evidence and may intentionally fail or depend on fixtures; only the playground sequences are replayed, in the browser engine. See [behavioral testing](/contributing/testing/) for the real full-catalog runtime gate.
 
 ## Continuous integration
 

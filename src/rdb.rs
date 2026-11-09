@@ -19,6 +19,15 @@ pub const MODULE_VERSION: u64 = 1;
 pub const OPCODE_HASH_TEMPLATE: u8 = 242;
 const MODULE_NAME: &[u8; 9] = b"ffkvdata_";
 
+/// One key's DUMP payload as MIGRATE transfers it.
+#[derive(Debug)]
+pub struct MigrateItem {
+    pub key: Bytes,
+    pub dump: Bytes,
+    /// Absolute Unix expiration in milliseconds; None means persistent.
+    pub expires_at: Option<i64>,
+}
+
 fn invalid(message: &'static str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, message)
 }

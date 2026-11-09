@@ -145,7 +145,7 @@ impl Engine {
             let bytes = size_of::<(Bytes, Entry)>()
                 .saturating_add(key.len())
                 .saturating_add(value_allocations(&entry.value, DEFAULT_SAMPLES));
-            let slot = usize::from(crate::cluster::key_slot(key));
+            let slot = usize::from(crate::slot::key_slot(key));
             if let Some(total) = slots.get_mut(slot) {
                 *total = total.saturating_add(bytes as u64);
             }

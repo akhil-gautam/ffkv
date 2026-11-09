@@ -33,6 +33,8 @@ SEMVER = re.compile(
 TEXT_FIELDS = [
     ("Cargo.toml", r'(?m)^\[package\]\nname = "ffkv"\nversion = "([^"]+)"'),
     ("Cargo.lock", r'(?m)^name = "ffkv"\nversion = "([^"]+)"'),
+    ("crates/ffkv-wasm/Cargo.toml", r'(?m)^\[package\]\nname = "ffkv-wasm"\nversion = "([^"]+)"'),
+    ("Cargo.lock", r'(?m)^name = "ffkv-wasm"\nversion = "([^"]+)"'),
     ("deploy/helm/ffkv/Chart.yaml", r"(?m)^version: (\S+)$"),
     ("deploy/helm/ffkv/Chart.yaml", r"(?m)^appVersion: '([^']+)'$"),
     ("deploy/helm/ffkv/values.yaml", r"(?m)^  tag: '([^']+)'$"),

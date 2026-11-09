@@ -1,0 +1,110 @@
+---
+// One interactive ffkv-cli style terminal backed by the in-browser engine.
+// All terminals on a page are separate client sessions sharing one dataset.
+import { docsLink } from '../lib/links';
+import { version } from '../lib/version';
+
+interface Props {
+  /** Unique per page; guided-example buttons target it with data-ffkv-run. */
+  name: string;
+  label: string;
+  /** Pre-fill the input from the page's ?cmd= query parameter. */
+  prefillFromQuery?: boolean;
+  size?: 'compact' | 'tall';
+}
+const { name, label, prefillFromQuery = false, size = 'tall' } = Astro.props;
+const input = `ffkv-term-${name}-input`;
+---
+
+<section
+  class={`ffkv-term not-content is-${size}`}
+  aria-label={label}
+  data-ffkv-terminal={name}
+  data-wasm={`${docsLink('playground/ffkv.wasm')}?v=${version}`}
+  data-query-prefill={prefillFromQuery ? '' : undefined}
+>
+  <div class="ffkv-term__bar">
+    <span class="ffkv-term__dots" aria-hidden="true"><i></i><i></i><i></i></span>
+    <span class="ffkv-term__label">{label}</span>
+    <span class="ffkv-term__status" role="status" data-status>Loads on first use</span>
+    <button type="button" class="ffkv-term__tool" data-clear>Clear</button>
+  </div>
+  <div class="ffkv-term__screen" data-screen>
+    <div class="ffkv-term__log" role="log" aria-label={`${label} output`} data-log></div>
+    <div class="ffkv-term__pending" data-pending hidden>
+      <span></span>
+      <button type="button" class="ffkv-term__tool" data-run-pending>Run all</button>
+    </div>
+    <form class="ffkv-term__line" data-form>
+      <span class="ffkv-term__prompt" aria-hidden="true" data-prompt>ffkv&gt; </span>
+      <input
+        id={input}
+        type="text"
+        aria-label={`Command for ${label}`}
+        autocomplete="off"
+        autocapitalize="off"
+        spellcheck="false"
+        enterkeyhint="send"
+        data-input
+      />
+    </form>
+    <div class="ffkv-term__waiting" data-waiting hidden>
+      <span>Blocked, waiting for data…</span>
+      <button type="button" class="ffkv-term__tool" data-cancel>Cancel <kbd>Ctrl+C</kbd></button>
+    </div>
+  </div>
+  <noscript><p class="ffkv-term__note">The playground needs JavaScript and WebAssembly.</p></noscript>
+</section>
+
+<script>
+  import '../lib/playground/terminal';
+</script>
+
+<style is:global>
+  .ffkv-term {
+    --term-bg: #11180c; --term-ink: #dfe8d4; --term-bright: #f4f7ee; --term-lime: #b9e38f;
+    --term-amber: #f6c26b; --term-coral: #f29a7c; --term-muted: #8e9a83;
+    display: flex; flex-direction: column; min-width: 0; text-align: left;
+    background: var(--term-bg); color: var(--term-ink); border-radius: 1.2rem; overflow: hidden;
+    box-shadow: 0 1px 2px rgb(23 33 15 / .06), 0 30px 60px -30px rgb(23 33 15 / .45), inset 0 0 0 1px rgb(255 255 255 / .07);
+    font: .8rem/1.7 'Geist Mono Variable', ui-monospace, SFMono-Regular, Menlo, monospace;
+    transition-property: box-shadow; transition-duration: .15s;
+  }
+  .ffkv-term:has(.ffkv-term__line input:focus-visible), .ffkv-term:has(.ffkv-term__waiting button:focus-visible) {
+    box-shadow: 0 1px 2px rgb(23 33 15 / .06), 0 30px 60px -30px rgb(23 33 15 / .45), inset 0 0 0 1px rgb(255 255 255 / .07), 0 0 0 2px #8fc66a;
+  }
+  .ffkv-term [hidden] { display: none !important; }
+  .ffkv-term__bar { display: flex; align-items: center; gap: .7rem; padding: .45rem .5rem .45rem 1rem; border-bottom: 1px solid rgb(255 255 255 / .06); font-family: 'Geist Variable', ui-sans-serif, system-ui, sans-serif; }
+  .ffkv-term__dots { display: inline-flex; gap: .4rem; }
+  .ffkv-term__dots i { width: 10px; height: 10px; border-radius: 50%; background: #3a4632; }
+  .ffkv-term__label { font-size: .75rem; font-weight: 550; color: #c9d2bd; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .ffkv-term__status { margin-left: auto; display: inline-flex; align-items: center; gap: .4rem; font-size: .7rem; color: var(--term-muted); white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .ffkv-term__status::before { content: ''; width: 7px; height: 7px; border-radius: 50%; background: #3a4632; }
+  .ffkv-term[data-state='loading'] .ffkv-term__status::before { background: var(--term-amber); animation: ffkv-term-pulse .8s ease-in-out infinite alternate; }
+  .ffkv-term[data-state='ready'] .ffkv-term__status::before { background: var(--term-lime); }
+  .ffkv-term[data-state='failed'] .ffkv-term__status::before { background: var(--term-coral); }
+  @keyframes ffkv-term-pulse { to { opacity: .3; } }
+  .ffkv-term__tool { display: inline-flex; align-items: center; gap: .4rem; min-height: 32px; padding: 0 .7rem; border: 0; border-radius: .5rem; background: rgb(255 255 255 / .08); color: var(--term-bright); font: 500 .72rem 'Geist Variable', ui-sans-serif, system-ui, sans-serif; cursor: pointer; transition-property: background-color; transition-duration: .15s; }
+  .ffkv-term__tool:hover { background: rgb(255 255 255 / .16); }
+  .ffkv-term__tool:focus-visible { outline: 2px solid var(--term-lime); outline-offset: 2px; }
+  .ffkv-term__tool kbd { font: inherit; color: var(--term-muted); }
+  .ffkv-term__screen { overflow-y: auto; overscroll-behavior: contain; padding: .9rem 1.1rem 1rem; cursor: text; scrollbar-width: thin; scrollbar-color: #3a4632 transparent; }
+  .ffkv-term.is-tall .ffkv-term__screen { height: 26rem; }
+  .ffkv-term.is-compact .ffkv-term__screen { height: 18rem; }
+  .ffkv-term__pending { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem .8rem; margin: .2rem 0 .5rem; color: var(--term-lime); }
+  .ffkv-term__log > div { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .ffkv-term__echo { color: var(--term-bright); }
+  .ffkv-term__prompt { color: var(--term-lime); white-space: pre; }
+  .ffkv-term__out { color: var(--term-amber); }
+  .ffkv-term__out.is-error, .ffkv-term__note.is-error { color: var(--term-coral); }
+  .ffkv-term__note { color: var(--term-muted); }
+  .ffkv-term__line { display: flex; align-items: baseline; margin: 0; }
+  .ffkv-term__line input { flex: 1; min-width: 0; margin: 0; padding: 0; border: 0; outline: 0; background: transparent; color: var(--term-bright); font: inherit; caret-color: var(--term-lime); }
+  .ffkv-term__waiting { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem .8rem; color: var(--term-amber); }
+  .ffkv-term > noscript p { margin: 0; padding: 0 1.1rem 1rem; }
+  /* 16px inputs keep mobile browsers from zooming the page on focus. */
+  @media (pointer: coarse), (max-width: 40rem) { .ffkv-term__line input { font-size: 16px; } }
+  @media (prefers-reduced-motion: reduce) {
+    .ffkv-term[data-state='loading'] .ffkv-term__status::before { animation: none; }
+  }
+</style>

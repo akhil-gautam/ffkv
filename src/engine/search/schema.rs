@@ -18,40 +18,41 @@ fn take<'a>(a: &'a [Bytes], i: &mut usize) -> Result<&'a Bytes, String> {
     Ok(v)
 }
 pub fn language(s: &str) -> bool {
-    matches!(
-        s.to_ascii_lowercase().as_str(),
-        "arabic"
-            | "armenian"
-            | "basque"
-            | "catalan"
-            | "chinese"
-            | "danish"
-            | "dutch"
-            | "english"
-            | "finnish"
-            | "french"
-            | "german"
-            | "greek"
-            | "hindi"
-            | "hungarian"
-            | "indonesian"
-            | "irish"
-            | "italian"
-            | "lithuanian"
-            | "malay"
-            | "nepali"
-            | "norwegian"
-            | "portuguese"
-            | "romanian"
-            | "russian"
-            | "serbian"
-            | "spanish"
-            | "swedish"
-            | "tagalog"
-            | "tamil"
-            | "turkish"
-            | "yiddish"
-    )
+    let s = s.to_ascii_lowercase();
+    (super::text::CHINESE_SEGMENTATION && s == "chinese")
+        || matches!(
+            s.as_str(),
+            "arabic"
+                | "armenian"
+                | "basque"
+                | "catalan"
+                | "danish"
+                | "dutch"
+                | "english"
+                | "finnish"
+                | "french"
+                | "german"
+                | "greek"
+                | "hindi"
+                | "hungarian"
+                | "indonesian"
+                | "irish"
+                | "italian"
+                | "lithuanian"
+                | "malay"
+                | "nepali"
+                | "norwegian"
+                | "portuguese"
+                | "romanian"
+                | "russian"
+                | "serbian"
+                | "spanish"
+                | "swedish"
+                | "tagalog"
+                | "tamil"
+                | "turkish"
+                | "yiddish"
+        )
 }
 pub fn create(a: &[Bytes], now: i64) -> Result<(Schema, bool), String> {
     let name = word(a.get(1).ok_or("Missing index name")?)?.to_owned();

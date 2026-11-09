@@ -202,7 +202,7 @@ impl<'a> Atomic<'a> {
         let mut slot = self.script_slot;
         if !invocation.flags.allow_cross_slot_keys {
             for key in keys {
-                let next = crate::cluster::key_slot(key);
+                let next = crate::slot::key_slot(key);
                 if slot.is_some_and(|previous| previous != next) {
                     return Err(Resp::Error(
                         "ERR Script attempted to access keys that do not hash to the same slot"
@@ -354,7 +354,7 @@ impl<'a> Atomic<'a> {
         };
         let visible = |key: &Bytes| {
             slots
-                .get(crate::cluster::key_slot(key) as usize)
+                .get(crate::slot::key_slot(key) as usize)
                 .copied()
                 .unwrap_or(false)
         };
@@ -845,7 +845,7 @@ impl<'a> Atomic<'a> {
         self.control = Some(scripts.execution_control());
         self.script_slot = None;
         for key in command.accessed_keys() {
-            let slot = crate::cluster::key_slot(&key);
+            let slot = crate::slot::key_slot(&key);
             if self.cluster && self.script_slot.is_some_and(|previous| previous != slot) {
                 self.session = previous_session;
                 self.invocation = previous_context;

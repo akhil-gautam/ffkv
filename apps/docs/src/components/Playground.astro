@@ -1,0 +1,153 @@
+---
+// The /playground/ page body: guided examples above two terminals that share one dataset.
+import PlaygroundTerminal from './PlaygroundTerminal.astro';
+
+type Step = { in: 'a' | 'b'; command: string; note: string };
+const examples: { id: string; title: string; summary: string; steps: Step[] }[] = [
+  { id: 'strings', title: 'Strings & TTL', summary: 'Set and read values, count with INCR, and let a key expire.', steps: [
+    { in: 'a', command: 'SET greeting "hello ffkv"', note: 'Quote values that contain spaces.' },
+    { in: 'b', command: 'GET greeting', note: 'Terminal B reads the same dataset.' },
+    { in: 'a', command: 'INCR visits', note: 'Counters start at 0.' },
+    { in: 'a', command: 'INCRBY visits 10', note: '' },
+    { in: 'a', command: 'SET session:42 ada EX 10', note: 'Expires in 10 seconds.' },
+    { in: 'a', command: 'TTL session:42', note: 'Run it again to watch it count down; -2 means the key is gone.' },
+  ] },
+  { id: 'queue', title: 'List queue', summary: 'Terminal B waits on BLPOP until terminal A pushes a job.', steps: [
+    { in: 'b', command: 'BLPOP jobs 0', note: 'Blocks until a job arrives (0 means no timeout).' },
+    { in: 'a', command: 'LPUSH jobs email.welcome', note: 'Terminal B receives the job right away.' },
+    { in: 'a', command: 'RPUSH jobs invoice.render report.weekly', note: '' },
+    { in: 'a', command: 'LRANGE jobs 0 -1', note: '' },
+    { in: 'b', command: 'BLPOP jobs 5', note: 'Pops the next job; with an empty list it would time out after 5 seconds.' },
+    { in: 'a', command: 'LLEN jobs', note: '' },
+  ] },
+  { id: 'hashes', title: 'Hashes', summary: 'Store an object as field-value pairs.', steps: [
+    { in: 'a', command: 'HSET user:1 name Ada lang Rust', note: '' },
+    { in: 'a', command: 'HGET user:1 name', note: '' },
+    { in: 'a', command: 'HINCRBY user:1 logins 1', note: '' },
+    { in: 'b', command: 'HGETALL user:1', note: '' },
+  ] },
+  { id: 'leaderboard', title: 'Leaderboard', summary: 'A sorted set keeps members ordered by score.', steps: [
+    { in: 'a', command: 'ZADD board 120 ada 95 linus 140 grace', note: '' },
+    { in: 'b', command: 'ZINCRBY board 50 linus', note: '' },
+    { in: 'a', command: 'ZREVRANGE board 0 -1 WITHSCORES', note: 'Highest score first.' },
+    { in: 'a', command: 'ZREVRANK board ada', note: 'Rank from the top, starting at 0.' },
+  ] },
+  { id: 'json', title: 'JSON', summary: 'Store a document and update parts of it with JSONPath.', steps: [
+    { in: 'a', command: `JSON.SET user:2 $ '{"name":"Grace","langs":["COBOL"]}'`, note: '' },
+    { in: 'a', command: `JSON.ARRAPPEND user:2 $.langs '"Fortran"'`, note: '' },
+    { in: 'b', command: 'JSON.GET user:2 $.langs', note: '' },
+    { in: 'a', command: 'JSON.SET user:2 $.age 36', note: '' },
+    { in: 'b', command: 'JSON.NUMINCRBY user:2 $.age 1', note: '' },
+    { in: 'b', command: 'JSON.GET user:2', note: '' },
+  ] },
+  { id: 'streams', title: 'Streams', summary: 'Terminal B waits for new stream entries that terminal A appends.', steps: [
+    { in: 'b', command: 'XREAD BLOCK 0 STREAMS orders $', note: 'Waits for entries newer than now.' },
+    { in: 'a', command: 'XADD orders * item book qty 1', note: 'Terminal B receives the entry.' },
+    { in: 'a', command: 'XADD orders * item pen qty 3', note: '' },
+    { in: 'b', command: 'XRANGE orders - +', note: '' },
+    { in: 'a', command: 'XLEN orders', note: '' },
+  ] },
+  { id: 'pubsub', title: 'Pub/Sub', summary: 'Messages published in terminal A reach the subscriber in terminal B.', steps: [
+    { in: 'b', command: 'SUBSCRIBE news', note: '' },
+    { in: 'a', command: 'PUBLISH news "hello subscribers"', note: 'Replies with the number of subscribers that received it.' },
+    { in: 'a', command: 'PUBLISH news "second message"', note: '' },
+    { in: 'b', command: 'UNSUBSCRIBE news', note: '' },
+  ] },
+  { id: 'resp3', title: 'HELLO 3', summary: 'Switch one connection to RESP3 and compare the reply types.', steps: [
+    { in: 'a', command: 'HSET user:3 name Linus lang C', note: '' },
+    { in: 'a', command: 'HELLO 3', note: 'Only terminal A switches protocol.' },
+    { in: 'a', command: 'HGETALL user:3', note: 'RESP3 returns a map.' },
+    { in: 'b', command: 'HGETALL user:3', note: 'RESP2 returns a flat array.' },
+    { in: 'a', command: 'HELLO 2', note: '' },
+  ] },
+];
+---
+
+<div class="ffkv-playground not-content">
+  <div class="ffkv-playground__examples">
+    <div class="ffkv-playground__tabs" role="tablist" aria-label="Guided examples">
+      {examples.map((example, index) => (
+        <button type="button" role="tab" id={`example-tab-${example.id}`} aria-controls={`example-${example.id}`} aria-selected={index === 0 ? 'true' : 'false'} tabindex={index === 0 ? 0 : -1}>{example.title}</button>
+      ))}
+    </div>
+    {examples.map((example, index) => (
+      <div class="ffkv-playground__panel" role="tabpanel" id={`example-${example.id}`} aria-labelledby={`example-tab-${example.id}`} hidden={index !== 0}>
+        <p>{example.summary} Select a step to run it in that terminal.</p>
+        <ol>
+          {example.steps.map((step) => (
+            <li>
+              <button type="button" data-ffkv-run={step.in} data-command={step.command}>
+                <span class="sr-only">Run in terminal </span><span class="ffkv-playground__who">{step.in.toUpperCase()}</span>
+                <code>{step.command}</code>
+              </button>
+              {step.note && <span class="ffkv-playground__why">{step.note}</span>}
+            </li>
+          ))}
+        </ol>
+      </div>
+    ))}
+  </div>
+
+  <div class="ffkv-playground__terminals">
+    <PlaygroundTerminal name="a" label="Terminal A" prefillFromQuery />
+    <PlaygroundTerminal name="b" label="Terminal B" />
+  </div>
+
+  <div class="ffkv-playground__footer">
+    <ul class="ffkv-playground__keys" aria-label="Keyboard shortcuts">
+      <li><kbd>↑</kbd> <kbd>↓</kbd> history</li>
+      <li><kbd>Ctrl+L</kbd> clear</li>
+      <li><kbd>Ctrl+C</kbd> cancel a blocked command</li>
+    </ul>
+    <button type="button" class="ffkv-playground__reset" data-ffkv-reset>Reset data</button>
+  </div>
+</div>
+
+<script>
+  const tabs = [...document.querySelectorAll<HTMLButtonElement>('.ffkv-playground__tabs [role="tab"]')];
+  const select = (tab: HTMLButtonElement) => {
+    for (const other of tabs) {
+      const on = other === tab;
+      other.setAttribute('aria-selected', String(on));
+      other.tabIndex = on ? 0 : -1;
+      document.getElementById(other.getAttribute('aria-controls')!)!.hidden = !on;
+    }
+  };
+  tabs.forEach((tab, index) => {
+    tab.addEventListener('click', () => select(tab));
+    tab.addEventListener('keydown', (event) => {
+      const step = event.key === 'ArrowRight' ? 1 : event.key === 'ArrowLeft' ? -1 : 0;
+      if (!step) return;
+      event.preventDefault();
+      const next = tabs[(index + step + tabs.length) % tabs.length];
+      select(next);
+      next.focus();
+    });
+  });
+</script>
+
+<style is:global>
+  /* The two terminals need more room than prose. */
+  :root:has(.ffkv-playground) { --sl-content-width: 68rem; }
+  .ffkv-playground { display: grid; gap: 1rem; margin-block: 1.5rem 2.5rem; }
+  .ffkv-playground__tabs { display: flex; flex-wrap: wrap; gap: .25rem; padding: .3rem; border-radius: .9rem; background: var(--docs-surface-raised); width: fit-content; max-width: 100%; }
+  .ffkv-playground__tabs button { min-height: 40px; padding: 0 .85rem; border: 0; border-radius: .65rem; background: transparent; color: var(--docs-muted); font: 500 .85rem var(--sl-font); cursor: pointer; }
+  .ffkv-playground__tabs button:hover { color: var(--docs-ink); }
+  .ffkv-playground__tabs button[aria-selected='true'] { background: var(--docs-surface); color: var(--docs-ink); box-shadow: var(--docs-shadow); }
+  .ffkv-playground__panel { padding: 1rem 1.2rem; border-radius: 1rem; background: var(--docs-surface); box-shadow: var(--docs-shadow); }
+  .ffkv-playground__panel p { margin: 0 0 .7rem; color: var(--docs-muted); font-size: .92rem; }
+  .ffkv-playground__panel ol { list-style: none; margin: 0; padding: 0; display: grid; gap: .35rem; }
+  .ffkv-playground__panel li { display: flex; flex-wrap: wrap; align-items: center; gap: .3rem .8rem; }
+  .ffkv-playground__panel li button { display: inline-flex; align-items: center; gap: .55rem; min-height: 40px; max-width: 100%; padding: .3rem .7rem .3rem .35rem; border: 0; border-radius: .6rem; background: var(--docs-surface-raised); color: var(--docs-ink); text-align: left; cursor: pointer; }
+  .ffkv-playground__panel li button:hover { box-shadow: inset 0 0 0 1px var(--docs-lime); }
+  .ffkv-playground__panel li button:active { scale: .98; }
+  .ffkv-playground__panel code { font: .8rem/1.4 var(--sl-font-mono); overflow-wrap: anywhere; background: none; padding: 0; }
+  .ffkv-playground__who { flex: none; display: grid; place-items: center; width: 1.6rem; height: 1.6rem; border-radius: .45rem; background: var(--docs-lime); color: var(--docs-button-ink); font: 650 .72rem var(--sl-font); }
+  .ffkv-playground__why { font-size: .82rem; color: var(--docs-faint); }
+  .ffkv-playground__terminals { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 22rem), 1fr)); gap: 1rem; }
+  .ffkv-playground__footer { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .6rem 1rem; }
+  .ffkv-playground__keys { display: flex; flex-wrap: wrap; gap: .3rem 1.2rem; margin: 0; padding: 0; list-style: none; font-size: .82rem; color: var(--docs-faint); }
+  .ffkv-playground__footer kbd { padding: .05rem .35rem; border-radius: .35rem; background: var(--docs-surface-raised); font: .75rem var(--sl-font-mono); color: var(--docs-muted); }
+  .ffkv-playground__reset { min-height: 40px; padding: 0 1rem; border: 0; border-radius: .7rem; background: var(--docs-surface); box-shadow: var(--docs-shadow), inset 0 0 0 1px var(--docs-line); color: var(--docs-ink); font: 550 .85rem var(--sl-font); cursor: pointer; }
+  .ffkv-playground__reset:hover { box-shadow: var(--docs-shadow), inset 0 0 0 1px var(--docs-lime); }
+</style>

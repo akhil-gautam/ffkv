@@ -1,3 +1,5 @@
+mod rules;
+
 use std::{mem, sync::Arc, time::Instant};
 
 use bytes::Bytes;
@@ -9,17 +11,14 @@ use crate::{
     state::{ClientLease, State},
     watch::Token,
 };
+use rules::{
+    Transaction, allowed_while_subscribed, auth_credentials, client_setinfo, hello_reply,
+    invalid_client_name, is_subscription_command, no_password_configured, parse_hello, printable,
+    subscribed_mode_error, subscribed_ping,
+};
 
-const MAX_QUEUED_COMMANDS: usize = 1024;
-const MAX_QUEUED_BYTES: usize = 16 * 1024 * 1024;
 const MAX_WATCHED_KEYS: usize = 1024;
 const MAX_FAILED_AUTH: u8 = 16;
-
-struct Transaction {
-    commands: Vec<Vec<Bytes>>,
-    bytes: usize,
-    dirty: bool,
-}
 
 pub enum Action {
     Reply(Resp),
@@ -64,12 +63,6 @@ pub struct Connection {
 
 fn error(message: &'static str) -> Resp {
     Resp::Error(message.into())
-}
-fn printable(value: &[u8]) -> bool {
-    value.len() <= 256 && value.iter().all(|byte| (b'!'..=b'~').contains(byte))
-}
-fn bulk(value: &'static str) -> Resp {
-    Resp::Bulk(Some(Bytes::from_static(value.as_bytes())))
 }
 /// The name `CLIENT LIST` shows: a registered root's canonical lowercase name
 /// without allocating, else the binary-safe ASCII-lowercase first argument, or
@@ -169,27 +162,18 @@ impl Connection {
         Action::Reply(reply)
     }
 
-    /// Queued commands outlive the request, so only an accepted one is copied.
     fn queue(&mut self, args: &[Bytes]) -> Action {
-        let transaction = self.transaction.as_mut().expect("active transaction");
-        let bytes: usize = args.iter().map(Bytes::len).sum();
-        if transaction.commands.len() == MAX_QUEUED_COMMANDS
-            || transaction
-                .bytes
-                .checked_add(bytes)
-                .is_none_or(|bytes| bytes > MAX_QUEUED_BYTES)
-        {
-            transaction.dirty = true;
-            return Action::Reply(error("ERR transaction queue limit exceeded"));
-        }
-        transaction.bytes += bytes;
-        transaction.commands.push(args.to_vec());
-        Action::Reply(Resp::Simple("QUEUED"))
+        Action::Reply(
+            self.transaction
+                .as_mut()
+                .expect("active transaction")
+                .queue(args),
+        )
     }
 
     fn credentials(&mut self, username: &[u8], password: &[u8]) -> Result<Arc<User>, Resp> {
         let Some(acl) = &self.acl else {
-            return Err(error("ERR AUTH called without any password configured"));
+            return Err(no_password_configured());
         };
         let user = if username.len() <= 256 && password.len() <= 1024 {
             acl.authenticate(username, password)
@@ -222,8 +206,8 @@ impl Connection {
     }
 
     fn authenticate(&mut self, args: &[Bytes]) -> Resp {
-        let (username, password) = match args {
-            [_, password] => {
+        let (username, password) = match auth_credentials(args) {
+            Ok((None, password)) => {
                 if self
                     .acl
                     .as_ref()
@@ -231,10 +215,10 @@ impl Connection {
                 {
                     return error("ERR password-only AUTH requires a configured default password");
                 }
-                (b"default".as_slice(), password.as_ref())
+                (b"default".as_slice(), password)
             }
-            [_, username, password] => (username.as_ref(), password.as_ref()),
-            _ => return error("ERR wrong number of arguments for AUTH"),
+            Ok((Some(username), password)) => (username, password),
+            Err(reply) => return reply,
         };
         match self.credentials(username, password) {
             Ok(user) => {
@@ -291,22 +275,9 @@ impl Connection {
         }
         if self.version == Version::Resp2
             && self.subscription.active()
-            && ![
-                b"SUBSCRIBE".as_slice(),
-                b"PSUBSCRIBE",
-                b"UNSUBSCRIBE",
-                b"PUNSUBSCRIBE",
-                b"PING",
-                b"SSUBSCRIBE",
-                b"SUNSUBSCRIBE",
-                b"RESET",
-            ]
-            .iter()
-            .any(|name| command.eq_ignore_ascii_case(name))
+            && !allowed_while_subscribed(command)
         {
-            return Action::Reply(error(
-                "ERR Can't execute command in subscribed mode: only SUBSCRIBE / PSUBSCRIBE / UNSUBSCRIBE / PUNSUBSCRIBE / PING / QUIT are allowed",
-            ));
+            return Action::Reply(subscribed_mode_error());
         }
         let reconfiguration = command.eq_ignore_ascii_case(b"HELLO")
             || command.eq_ignore_ascii_case(b"CLIENT")
@@ -402,17 +373,7 @@ impl Connection {
         if self.transaction.is_some() && !bound.transaction_allowed() {
             return self.reject(error("ERR Command not allowed inside a transaction"));
         }
-        let subscription_command = [
-            b"SUBSCRIBE".as_slice(),
-            b"PSUBSCRIBE",
-            b"UNSUBSCRIBE",
-            b"PUNSUBSCRIBE",
-            b"SSUBSCRIBE",
-            b"SUNSUBSCRIBE",
-        ]
-        .iter()
-        .any(|name| command.eq_ignore_ascii_case(name));
-        if subscription_command {
+        if is_subscription_command(command) {
             if self.transaction.is_some() {
                 return self.reject(error(
                     "ERR subscription commands are not allowed inside MULTI",
@@ -430,20 +391,13 @@ impl Connection {
             && self.version == Version::Resp2
             && self.subscription.active()
         {
-            return Action::Reply(Resp::Array(Some(vec![
-                bulk("pong"),
-                Resp::Bulk(Some(args.get(1).cloned().unwrap_or_default())),
-            ])));
+            return Action::Reply(subscribed_ping(args));
         }
         if command.eq_ignore_ascii_case(b"MULTI") && args.len() == 1 {
             if self.transaction.is_some() {
                 return Action::Reply(error("ERR MULTI calls can not be nested"));
             }
-            self.transaction = Some(Transaction {
-                commands: Vec::new(),
-                bytes: 0,
-                dirty: false,
-            });
+            self.transaction = Some(Transaction::default());
             self.control.set_transaction(true);
             return Action::Reply(Resp::Simple("OK"));
         }
@@ -547,81 +501,41 @@ impl Connection {
 
     fn hello(&mut self, bound: &mut BoundCommand<'_>) -> Resp {
         let args = bound.args();
-        let mut version = self.version;
-        let mut name = None;
-        let mut user = None;
-        if let Some(protocol) = args.get(1) {
-            version = match protocol.as_ref() {
-                b"2" => Version::Resp2,
-                b"3" => Version::Resp3,
-                _ => return error("NOPROTO unsupported protocol version"),
-            };
-        }
-        let mut position = 2;
-        while position < args.len() {
-            if args[position].eq_ignore_ascii_case(b"SETNAME") && position + 1 < args.len() {
-                let value = &args[position + 1];
-                if !printable(value) {
-                    return error(
-                        "ERR Client names must be printable ASCII without spaces and at most 256 bytes",
-                    );
-                }
-                name = Some(value.clone());
-                position += 2;
-            } else if args[position].eq_ignore_ascii_case(b"AUTH") && position + 2 < args.len() {
-                if user.is_some() {
-                    return error("ERR duplicate HELLO AUTH option");
-                }
-                match self.credentials(&args[position + 1], &args[position + 2]) {
-                    Ok(authenticated) => user = Some(authenticated),
-                    Err(reply) => return reply,
-                }
-                position += 3;
-            } else {
-                return error("ERR syntax error in HELLO option");
-            }
-        }
-        if self.acl.is_some() && user.is_none() && self.user.is_none() {
+        let hello = match parse_hello(args, self.version, |username, password| {
+            self.credentials(username, password)
+        }) {
+            Ok(hello) => hello,
+            Err(reply) => return reply,
+        };
+        if self.acl.is_some() && hello.user.is_none() && self.user.is_none() {
             return error("NOAUTH Authentication required.");
         }
         // Validate the complete candidate before committing any connection state.
-        if let Some(candidate) = user.as_ref().or(self.user.as_ref())
+        if let Some(candidate) = hello.user.as_ref().or(self.user.as_ref())
             && let Err(reply) = bound
                 .check()
                 .and_then(|()| bound.authorize(candidate, self.audit().as_ref()))
         {
             return reply;
         }
-        if let Some(user) = user {
+        if let Some(user) = hello.user {
             self.set_user(user);
         }
+        let version = hello.version;
         self.version = version;
         self.lease.set_version(version);
         self.control.set_version(version);
-        if let Some(name) = name {
+        if let Some(name) = hello.name {
             self.control
                 .set_field("name", String::from_utf8_lossy(&name).into_owned());
             self.lease.set_name((!name.is_empty()).then_some(name));
         }
-        Resp::Map(vec![
-            (bulk("server"), bulk("ffkv")),
-            (bulk("version"), bulk(env!("CARGO_PKG_VERSION"))),
-            (
-                bulk("proto"),
-                Resp::Integer(if version == Version::Resp3 { 3 } else { 2 }),
-            ),
-            (bulk("id"), Resp::Integer(self.lease.id as i64)),
-            (
-                bulk("mode"),
-                bulk(if self.state.cluster.get().is_some() {
-                    "cluster"
-                } else {
-                    "standalone"
-                }),
-            ),
-            (bulk("role"), bulk(self.state.role())),
-            (bulk("modules"), Resp::Array(Some(Vec::new()))),
-        ])
+        hello_reply(
+            version,
+            self.lease.id,
+            self.state.cluster.get().is_some(),
+            self.state.role(),
+        )
     }
 
     fn client(&mut self, args: &[Bytes]) -> Resp {
@@ -629,29 +543,19 @@ impl Connection {
             return error("ERR wrong number of arguments for CLIENT");
         };
         if subcommand.eq_ignore_ascii_case(b"SETINFO") && args.len() == 4 {
-            if !printable(&args[3]) {
-                return error(
-                    "ERR client library metadata must be printable ASCII and at most 256 bytes",
-                );
-            }
-            let library = if args[2].eq_ignore_ascii_case(b"LIB-NAME") {
-                true
-            } else if args[2].eq_ignore_ascii_case(b"LIB-VER") {
-                false
-            } else {
-                return error("ERR unrecognized CLIENT SETINFO option");
+            let (library, value) = match client_setinfo(args) {
+                Ok(field) => field,
+                Err(reply) => return reply,
             };
-            self.lease.set_library(library, args[3].clone());
+            self.lease.set_library(library, value.clone());
             self.control.set_field(
                 if library { "lib-name" } else { "lib-ver" },
-                String::from_utf8_lossy(&args[3]).into_owned(),
+                String::from_utf8_lossy(value).into_owned(),
             );
             Resp::Simple("OK")
         } else if subcommand.eq_ignore_ascii_case(b"SETNAME") && args.len() == 3 {
             if !printable(&args[2]) {
-                return error(
-                    "ERR Client names must be printable ASCII without spaces and at most 256 bytes",
-                );
+                return invalid_client_name();
             }
             self.lease
                 .set_name((!args[2].is_empty()).then(|| args[2].clone()));
