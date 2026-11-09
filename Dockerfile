@@ -32,6 +32,9 @@ RUN set -eux; \
     if [ "$TARGETARCH" = "$BUILDARCH" ]; then : > /cross-env; fi
 WORKDIR /build
 COPY Cargo.toml Cargo.lock build.rs ./
+# Workspace member manifest only: the image builds the server package, but
+# cargo must load every member listed in the root workspace.
+COPY crates/ffkv-wasm/Cargo.toml ./crates/ffkv-wasm/
 COPY src/ ./src/
 RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
     --mount=type=cache,target=/build/target,id=ffkv-target-$TARGETARCH,sharing=locked \
