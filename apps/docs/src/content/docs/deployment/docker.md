@@ -18,7 +18,7 @@ docker exec ffkv ffkv-cli PING          # PONG
 docker exec ffkv ffkv-cli SET greeting hello
 ```
 
-Images are built for `linux/amd64` and `linux/arm64`. They are tagged `latest` from `main`, `X.Y.Z` and `X.Y` from release tags, and `sha-<commit>` for every published build.
+Images are built for `linux/amd64` and `linux/arm64`. Release tags follow [Semantic Versioning](https://semver.org/): `X.Y.Z` is one exact release and `X.Y` follows that minor line's patch releases. `latest` tracks `main`, and `sha-<commit>` marks every published build. Pin `X.Y.Z` anywhere upgrades should be deliberate; the [changelog](https://github.com/akhil-gautam/ffkv/blob/main/CHANGELOG.md) lists what changed between releases.
 
 ffkv never serves RESP on a non-loopback address without TLS and an ACL. On first start, the entrypoint therefore creates the following in the volume under `/var/lib/ffkv/docker/`:
 

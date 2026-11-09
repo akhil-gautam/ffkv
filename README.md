@@ -195,3 +195,7 @@ See [development](https://ffkv.pages.dev/contributing/development/),
 [testing](https://ffkv.pages.dev/contributing/testing/) (including the BDD
 suite) and [benchmarks](https://ffkv.pages.dev/contributing/benchmarks/). The
 handbook source is in [`apps/docs`](apps/docs).
+
+ffkv uses [Semantic Versioning](https://semver.org/). Changes are listed in
+[CHANGELOG.md](CHANGELOG.md), and the release steps are in the
+[development guide](https://ffkv.pages.dev/contributing/development/#versions-and-releases).

@@ -4,6 +4,7 @@ import '@fontsource-variable/geist';
 import '@fontsource-variable/geist-mono';
 import catalog from '../../../../src/command_catalog.json';
 import { docsLink } from '../lib/links';
+import { version, shortVersion } from '../lib/version';
 
 const title = 'ffkv — freaking fast KV, on every core';
 const description = 'ffkv is a durable, multi-core key-value datastore in Rust for caches, queues and background jobs. It speaks RESP and beat Dragonfly in all 27 matched benchmark cases.';
@@ -81,7 +82,7 @@ const year = 2026;
       </svg>
       <div class="hero-inner">
         <div class="hero-main">
-          <p class="pill rise" style="--d:0"><span class="dot" aria-hidden="true"></span> ffkv 0.1 · open alpha · written in Rust</p>
+          <p class="pill rise" style="--d:0"><span class="dot" aria-hidden="true"></span> ffkv {shortVersion} · open alpha · written in Rust</p>
           <h1 id="hero-title"><span class="rise" style="--d:1">Freaking fast KV,</span><br /><em class="rise" style="--d:2">on every core.</em></h1>
           <p class="lead rise" style="--d:3">ffkv is a durable key-value datastore for caches, queues and background jobs. Connections spread across every CPU core, and it speaks RESP, so the clients you already use connect as they are.</p>
           <div class="hero-actions rise" style="--d:4">
@@ -282,7 +283,7 @@ const year = 2026;
         <div class="term-bar"><i></i><i></i><i></i><span>zsh</span></div>
 <pre><span class="tl type" style="--t:0"><span class="c">$</span> docker run -d --name ffkv -p 6379:6379 \</span>
 <span class="tl type" style="--t:1">    -v ffkv-data:/var/lib/ffkv ghcr.io/akhil-gautam/ffkv</span>
-<span class="tl" style="--t:2"><span class="m">ffkv 0.1.0 listening on 0.0.0.0:6379 (WAL Strict)</span></span>
+<span class="tl" style="--t:2"><span class="m">ffkv {version} listening on 0.0.0.0:6379 (WAL Strict)</span></span>
 
 <span class="tl type" style="--t:3"><span class="c">$</span> docker exec ffkv ffkv-cli PING</span>
 <span class="tl" style="--t:4"><span class="g">PONG</span></span>

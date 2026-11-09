@@ -71,6 +71,35 @@ This is an ownership map, not a request to add another dispatch convention. Read
 
 The console's actual package scripts are `dev`, `build` and `preview`; build uses TypeScript project compilation then Vite. For an end-to-end protected served console, follow [the walkthrough](/getting-started/console/) rather than assuming an unconfigured Vite page can authenticate cross-origin to any server. The static docs have a separate [deployment workflow](/deployment/documentation/).
 
+## Versions and releases
+
+ffkv follows [Semantic Versioning 2.0.0](https://semver.org/). A version is `MAJOR.MINOR.PATCH`, with an optional pre-release suffix such as `0.2.0-rc.1`. The public API that versions describe is what users depend on: RESP command behavior and reply shapes, `ffkv`/`ffkv-cli` flags and configuration, the on-disk WAL, checkpoint and backup formats, the management HTTP API, metrics names, and the container image's environment variables and data layout.
+
+- **Patch** (`0.1.0` → `0.1.1`): bug fixes that keep that API and read existing data.
+- **Minor** (`0.1.x` → `0.2.0`): new behavior. While the major version is 0, a minor release may also break compatibility; every break is listed in the changelog.
+- **Major** (from `1.0.0`): any incompatible change, such as an on-disk format a previous release can't read.
+
+`Cargo.toml` holds the version. `scripts/version.py` keeps the copies that other tools need (`Cargo.lock`, the docs and console `package.json` files, and the Helm chart) in step, and the handbook reads it from `Cargo.toml` when it builds. `ffkv --version` reports the same value.
+
+To cut a release:
+
+1. Move the entries under **Unreleased** in `CHANGELOG.md` into a new `## [X.Y.Z] - YYYY-MM-DD` section and update the compare links at the bottom.
+2. Set the version everywhere and confirm it:
+
+   ```sh
+   python3 scripts/version.py set X.Y.Z
+   python3 scripts/version.py check
+   ```
+
+3. Commit both changes as `Release X.Y.Z`, then tag and push:
+
+   ```sh
+   git tag -a vX.Y.Z -m "ffkv X.Y.Z"
+   git push origin main vX.Y.Z
+   ```
+
+The **Release** workflow refuses a tag that doesn't match every version field or has no changelog section. It runs the Rust tests, builds and smoke-tests the image, publishes `ghcr.io/akhil-gautam/ffkv:X.Y.Z` and `:X.Y` for amd64 and arm64, and creates the GitHub release from the changelog. Pre-release versions are marked as pre-releases. Pushes to `main` keep updating the `latest` image tag.
+
 ## Before proposing a change
 
 Add focused regression coverage at the owning module and real protocol scenarios for user-visible behavior. Update command metadata/catalog evidence when a command contract changes, plus the relevant docs. Use [testing](/contributing/testing/) for the complete BDD gate versus scoped feedback, and [benchmarks](/contributing/benchmarks/) for measurement methodology. Report only checks actually run on your checkout, not historical counts. No license grant should be inferred from a repository without a LICENSE file.

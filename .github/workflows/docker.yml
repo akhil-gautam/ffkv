@@ -3,7 +3,6 @@ name: Docker image
 on:
   push:
     branches: [main]
-    tags: ['v*']
     paths:
       - 'src/**'
       - 'build.rs'
@@ -21,6 +20,9 @@ on:
       - 'deploy/**'
       - '.github/workflows/docker.yml'
   workflow_dispatch:
+  # Releases (vX.Y.Z tags) call this from release.yml after the version check,
+  # which adds the X.Y.Z and X.Y image tags.
+  workflow_call:
 
 permissions:
   contents: read
@@ -83,7 +85,10 @@ jobs:
           test "$(docker exec ffkv-ci ffkv-cli PING)" = PONG
           docker exec ffkv-ci ffkv-cli SET ci:key persisted >/dev/null
           # Plaintext and unauthenticated clients are rejected.
-          ! printf 'PING\r\n' | timeout 3 nc 127.0.0.1 6379 | grep -q PONG
+          if printf 'PING\r\n' | timeout 3 nc 127.0.0.1 6379 | grep -q PONG; then
+            echo "plaintext PING was answered" >&2
+            exit 1
+          fi
           # Data and credentials survive a new container on the same volume.
           docker rm -f ffkv-ci
           docker run -d --name ffkv-ci -v ffkv-ci:/var/lib/ffkv ffkv:ci
